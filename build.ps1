@@ -1,4 +1,7 @@
-param([ValidateSet('Release')][string]$Configuration = 'Release')
+param(
+    [ValidateSet('Release')][string]$Configuration = 'Release',
+    [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')][string]$Version = '1.0.0'
+)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 if (!(Test-Path -LiteralPath (Join-Path $taskRoot 'build/deps/qt-static/lib/cmake/Qt6/Qt6Config.cmake'))) {
@@ -14,7 +17,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the MSVC environment.' }
 foreach ($taskLine in $taskEnvironment) {
     if ($taskLine -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') }
 }
-cmake -S $taskRoot -B (Join-Path $taskRoot 'build') -G 'Ninja Multi-Config'
+cmake -S $taskRoot -B (Join-Path $taskRoot 'build') -G 'Ninja Multi-Config' "-DFAST_PALETTE_VERSION=$Version"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
 cmake --build (Join-Path $taskRoot 'build') --config $Configuration --parallel
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }

@@ -99,7 +99,7 @@ bool PaletteWindow::create(HINSTANCE instance,bool background) {
         settings_open_=true;
         QDialog dialog(this);dialog.setWindowTitle("About Fast Palette");dialog.resize(680,500);
         auto* layout=new QVBoxLayout(&dialog);
-        auto* title=new QLabel("Fast Palette 0.2.0",&dialog);title->setProperty("role","title");layout->addWidget(title);
+        auto* title=new QLabel("Fast Palette " FAST_PALETTE_VERSION,&dialog);title->setProperty("role","title");layout->addWidget(title);
         auto* text=new QTextEdit(&dialog);text->setReadOnly(true);
         QString notices;
         for(const auto& name:QDir(":/licenses").entryList(QDir::Files,QDir::Name)) {

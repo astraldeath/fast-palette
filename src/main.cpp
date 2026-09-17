@@ -15,7 +15,7 @@ int main(int argc,char** argv) {
     }
     palette::ComApartment apartment;
     QApplication application(argc,argv);application.setQuitOnLastWindowClosed(false);
-    application.setApplicationName("Fast Palette");application.setApplicationVersion("0.2.0");
+    application.setApplicationName("Fast Palette");application.setApplicationVersion(FAST_PALETTE_VERSION);
     QApplication::setStyle("Fusion");palette::apply_ui_theme();application.setWindowIcon(palette::ui_icon(palette::UiIcon::logo));
     int result=0;
     {

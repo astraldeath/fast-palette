@@ -1,0 +1,18 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+    ["@semantic-release/release-notes-generator", { "preset": "conventionalcommits" }],
+    ["@semantic-release/exec", {
+      "prepareCmd": "pwsh -NoProfile -File ./build.ps1 -Version ${nextRelease.version} && pwsh -NoProfile -File ./tools/package.ps1"
+    }],
+    ["@semantic-release/github", {
+      "assets": ["dist/FastPalette.exe", "build/package/FastPalette.exe.sha256", "build/FastPalette-relink-kit.zip"],
+      "successComment": false,
+      "failComment": false,
+      "failTitle": false,
+      "releasedLabels": false
+    }]
+  ]
+}

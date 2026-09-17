@@ -349,10 +349,10 @@ try {
         throw "Expected one compiled theme resource initializer for $Configuration; found $($taskThemeInitMatches.Count)."
     }
     $taskThemeInitObject = $taskThemeInitMatches[0].FullName
-    $taskResource = Get-SingleFile $taskTargetObjects '*.res' 'FastPalette resource object'
+    $taskResource = Get-SingleFile (Join-Path $taskTargetObjects 'generated') '*.res' 'FastPalette resource object'
     $taskWindowsResourceInfo = Get-Item -LiteralPath $taskResource
-    $taskWindowsResourceSourceInfo = Get-Item -LiteralPath (Join-Path $taskRoot 'resources/app.rc')
-    $taskManifestInfo = Get-Item -LiteralPath (Join-Path $taskRoot 'resources/app.manifest')
+    $taskWindowsResourceSourceInfo = Get-Item -LiteralPath (Join-Path $taskBuild 'generated/app.rc')
+    $taskManifestInfo = Get-Item -LiteralPath (Join-Path $taskBuild 'generated/app.manifest')
     if ($taskWindowsResourceInfo.LastWriteTimeUtc -lt $taskWindowsResourceSourceInfo.LastWriteTimeUtc) {
         throw 'The compiled Windows resource is older than app.rc; rebuild FastPalette before packaging.'
     }
@@ -387,7 +387,7 @@ try {
     Copy-RequiredFile $taskThemeResourceObject (Join-Path $taskKitStage 'app-objects/qrc_theme_assets.cpp.obj')
     Copy-RequiredFile $taskThemeInitObject (Join-Path $taskKitStage 'app-objects/qrc_theme_assets_init.cpp.obj')
     Copy-RequiredFile $taskResource (Join-Path $taskKitStage 'app-objects/app.rc.res')
-    Copy-RequiredFile (Join-Path $taskRoot 'resources/app.manifest') (Join-Path $taskKitStage 'app-resources/app.manifest')
+    Copy-RequiredFile (Join-Path $taskBuild 'generated/app.manifest') (Join-Path $taskKitStage 'app-resources/app.manifest')
 
     Copy-RequiredFile (Join-Path $taskRoot 'CMakeLists.txt') (Join-Path $taskKitStage 'build-inputs/CMakeLists.txt')
     Copy-RequiredFile (Join-Path $taskRoot 'build.ps1') (Join-Path $taskKitStage 'build-inputs/build.ps1')

@@ -4,7 +4,7 @@ A Windows 11 launcher and calculator built with C++ and Qt Widgets. One portable
 
 ## Use
 
-Run `dist/FastPalette.exe`. The app stays in the system tray.
+Download `FastPalette.exe` from [Releases](https://github.com/astraldeath/fast-palette/releases/latest) and run it. The app stays in the system tray.
 
 - Tap a Windows key or press **Ctrl+Alt+Space** to open.
 - Type to search or calculate. **Enter** launches or copies; **Escape** closes.
@@ -27,3 +27,7 @@ Requires Visual Studio C++ Build Tools, Windows SDK, CMake 3.24+, Ninja, and Git
 The first build compiles static Qt; subsequent builds reuse it. Close Fast Palette before building. The build runs the test suite; packaging creates `dist/FastPalette.exe`.
 
 See [distribution](docs/distribution.md) for packaging and Qt source/relink materials.
+
+## Releases
+
+Push to `main` with Conventional Commits: `fix:` or `perf:` bumps the patch version, `feat:` bumps minor, and `!` or `BREAKING CHANGE:` bumps major. Other commits do not release. Pushing a `vMAJOR.MINOR.PATCH` tag publishes that version directly. Releases include the executable, SHA-256 checksum, and Qt relink kit.
