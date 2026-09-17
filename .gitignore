@@ -1,0 +1,7 @@
+/build/
+/.superpowers/
+/.vs/
+*.user
+/build-agent/
+/*.obj
+/dist/

@@ -1,0 +1,150 @@
+#include "core.hpp"
+
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <vector>
+
+namespace {
+
+int failures = 0;
+
+void expect(bool condition, const char* description) {
+    if (!condition) {
+        std::cerr << "FAIL: " << description << '\n';
+        ++failures;
+    }
+}
+
+void expect_value(std::wstring_view expression, double value, std::wstring_view text) {
+    const auto result = palette::calculate(expression);
+    expect(result.status == palette::CalcStatus::value, "expression produces a value");
+    expect(result.value == value, "expression has expected numeric value");
+    expect(result.text == text, "expression has expected formatted text");
+}
+
+palette::AppEntry app(std::wstring name, std::uint32_t use_count = 0, std::uint64_t last_used = 0) {
+    palette::AppEntry result;
+    result.name = std::move(name);
+    result.folded = palette::fold(result.name);
+    result.use_count = use_count;
+    result.last_used = last_used;
+    return result;
+}
+
+void calculator_examples() {
+    expect_value(L"2+3*4", 14.0, L"14");
+    expect_value(L"-2^2", -4.0, L"-4");
+    expect_value(L"2^3^2", 512.0, L"512");
+    expect_value(L"2^-2", 0.25, L".25");
+    expect_value(L"100+10%", 100.1, L"100.1");
+    expect_value(L"sqrt(81)", 9.0, L"9");
+    expect_value(L"ln(e)", 1.0, L"1");
+    expect_value(L"log10(100)", 2.0, L"2");
+}
+
+void calculator_classification_and_bounds() {
+    expect(palette::calculate(L"1/0").status == palette::CalcStatus::error,
+           "division by zero is an error");
+    expect(palette::calculate(L"sqrt(-1)").status == palette::CalcStatus::error,
+           "negative square root is an error");
+    expect(palette::calculate(L"2+").status == palette::CalcStatus::incomplete,
+           "trailing operator is incomplete");
+    expect(palette::calculate(L"Visual Studio").status == palette::CalcStatus::none,
+           "ordinary app name is not treated as a calculation");
+    expect(palette::calculate(L"=wat").status == palette::CalcStatus::error,
+           "equals prefix forces calculator errors");
+    expect(palette::calculate(std::wstring(513, L'1')).status == palette::CalcStatus::error,
+           "overlong expression is bounded");
+
+    std::wstring nesting(65, L'(');
+    nesting += L"1";
+    nesting.append(65, L')');
+    expect(palette::calculate(nesting).status == palette::CalcStatus::error,
+           "excessive nesting is bounded");
+}
+
+void calculator_round_trip_formatting() {
+    const std::vector<std::wstring> inputs = {
+        L"1/3", L"1e20+1", L"-0.000000123456789", L"pi", L"sin(.5)"
+    };
+    for (const auto& input : inputs) {
+        const auto result = palette::calculate(input);
+        expect(result.status == palette::CalcStatus::value, "round-trip input calculates");
+        if (result.status == palette::CalcStatus::value) {
+            wchar_t* end = nullptr;
+            const double parsed = std::wcstod(result.text.c_str(), &end);
+            expect(end && *end == L'\0', "formatted result is parseable");
+            expect(parsed == result.value, "formatted result round-trips exactly");
+        }
+    }
+}
+
+void search_ranking() {
+    const std::vector<palette::AppEntry> apps = {
+        app(L"Notepad++", 100, 100),
+        app(L"Notepad"),
+        app(L"My Visual Studio Helper", 100, 100),
+        app(L"Visual Studio")
+    };
+    const auto notepad = palette::search(apps, L"NOTEPAD");
+    expect(notepad.size() >= 2, "exact search finds both Notepad entries");
+    if (notepad.size() >= 2) {
+        expect(notepad[0].index == 1, "exact match beats a highly-used prefix match");
+        expect(notepad[1].index == 0, "prefix match remains visible");
+    }
+    const auto visual = palette::search(apps, L"visual studio");
+    expect(visual.size() >= 2, "prefix and substring matches are found");
+    if (visual.size() >= 2) {
+        expect(visual[0].index == 3, "prefix match beats highly-used substring match");
+        expect(visual[1].index == 2, "substring match follows prefix match");
+    }
+}
+
+void search_matching_and_limits() {
+    const auto later_boundary=palette::search({app(L"Xpad"),app(L"Notepad Pad")},L"pad");
+    expect(later_boundary.size()==2 && later_boundary[0].index==1,"later word-start match outranks an earlier substring");
+    const std::vector<palette::AppEntry> apps = {
+        app(L"\u00C9diteur"), app(L"Calculator"), app(L"Calendar"), app(L"Camera")
+    };
+    const auto unicode = palette::search(apps, L"\u00E9diteur");
+    expect(unicode.size() == 1 && unicode[0].index == 0,
+           "Unicode case-insensitive exact matching works");
+    expect(palette::search(apps, L"qzx").empty(), "missing subsequence returns no hits");
+    expect(palette::search(apps, L"ca", 2).size() == 2, "result count obeys the limit");
+    expect(palette::search(apps, L"ca", 0).empty(), "zero limit returns no hits");
+}
+
+void search_empty_query_usage_order() {
+    const std::vector<palette::AppEntry> apps = {
+        app(L"Recent", 5, 300),
+        app(L"Frequent", 10, 100),
+        app(L"Older tie", 5, 200)
+    };
+    const auto hits = palette::search(apps, L"");
+    expect(hits.size() == 3, "empty query returns catalog entries");
+    if (hits.size() == 3) {
+        expect(hits[0].index == 1, "empty query prioritizes use count");
+        expect(hits[1].index == 0, "empty query uses recency to break use-count ties");
+        expect(hits[2].index == 2, "older equal-use entry follows newer entry");
+    }
+}
+
+} // namespace
+
+int main() {
+    calculator_examples();
+    calculator_classification_and_bounds();
+    calculator_round_trip_formatting();
+    search_ranking();
+    search_matching_and_limits();
+    search_empty_query_usage_order();
+    if (failures != 0) {
+        std::cerr << failures << " core test(s) failed\n";
+        return EXIT_FAILURE;
+    }
+    std::cout << "core tests passed\n";
+    return EXIT_SUCCESS;
+}
