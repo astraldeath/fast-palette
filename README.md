@@ -14,7 +14,7 @@ Download `FastPalette.exe` from [Releases](https://github.com/astraldeath/fast-p
 - Enable **Everything** to search its index while Everything is running. Its prefix (default `? `) shows only Everything results. Enable **Only with prefix** to exclude it from ordinary searches. Everything syntax passes through unchanged, including `ext:pdf`, `size:>1mb`, wildcards, Boolean operators, and `regex:`.
 - Configured Windows shortcuts replace their normal action while the app runs. Other shortcuts pass through. Windows security shortcuts remain reserved.
 
-Examples: `2+3*4`, `sqrt(81)`, `2^10`, `sin(pi/2)`. Supports `+ - * / ^ %`, parentheses, `pi`, `e`, `sqrt`, `abs`, `sin`, `cos`, `tan`, `ln`, and `log10`. Angles use radians; `10%` means `0.1`. Prefix with `=` for calculation only.
+Examples: `2+3*4`, `sqrt(81)`, `2^10`, `100!`, `sin(pi/2)`. Supports `+ - * / ^ % !`, parentheses, `pi`, `e`, `sqrt`, `abs`, `sin`, `cos`, `tan`, `ln`, and `log10`. Factorials accept whole numbers from 0 to 170; large results use scientific notation. Angles use radians; `10%` means `0.1`. Prefix with `=` for calculation only.
 
 Settings are stored in `HKCU\Software\FastPalette`. Disable launch at sign-in before moving the executable. Use the tray menu to exit.
 

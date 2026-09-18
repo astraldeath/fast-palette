@@ -43,6 +43,23 @@ void calculator_examples() {
     expect_value(L"sqrt(81)", 9.0, L"9");
     expect_value(L"ln(e)", 1.0, L"1");
     expect_value(L"log10(100)", 2.0, L"2");
+    expect_value(L"0!", 1.0, L"1");
+    expect_value(L"5!", 120.0, L"120");
+    expect_value(L"(5+3)!", 40320.0, L"40320");
+    expect_value(L"2*3!+1", 13.0, L"13");
+    expect_value(L"2^3!", 64.0, L"64");
+    expect_value(L"-3!", -6.0, L"-6");
+    expect_value(L"= 5 ! / 4!", 5.0, L"5");
+    const auto large = palette::calculate(L"100!");
+    expect(large.status == palette::CalcStatus::value &&
+           std::abs(large.value / 9.332621544394415e157 - 1.0) < 1e-14,
+           "100 factorial produces a finite accurate result");
+    expect(palette::calculate(L"170!").status == palette::CalcStatus::value,
+           "largest representable factorial succeeds");
+    for (auto input : {L"(-1)!", L"2.5!", L"171!", L"1e100!", L"5!!"}) {
+        expect(palette::calculate(input).status == palette::CalcStatus::error,
+               "invalid, overflowing, or ambiguous factorial is rejected");
+    }
 }
 
 void calculator_classification_and_bounds() {
@@ -68,7 +85,7 @@ void calculator_classification_and_bounds() {
 
 void calculator_round_trip_formatting() {
     const std::vector<std::wstring> inputs = {
-        L"1/3", L"1e20+1", L"-0.000000123456789", L"pi", L"sin(.5)"
+        L"1/3", L"1e20+1", L"-0.000000123456789", L"pi", L"sin(.5)", L"100!"
     };
     for (const auto& input : inputs) {
         const auto result = palette::calculate(input);

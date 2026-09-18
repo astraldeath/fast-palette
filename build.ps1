@@ -1,6 +1,6 @@
 param(
     [ValidateSet('Release')][string]$Configuration = 'Release',
-    [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')][string]$Version = '1.2.0'
+    [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')][string]$Version = '1.3.0'
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot

@@ -115,8 +115,25 @@ private:
 
     double postfix() {
         double value = primary();
-        while (issue_ == ParseIssue::none && consume(L'%')) {
-            value /= 100.0;
+        while (issue_ == ParseIssue::none) {
+            if (consume(L'%')) {
+                value /= 100.0;
+            } else if (consume(L'!')) {
+                // Repeated bangs are ambiguous with double-factorial notation.
+                if (consume(L'!')) {
+                    issue_ = ParseIssue::invalid;
+                    break;
+                }
+                if (!std::isfinite(value) || value < 0.0 || value > 170.0 || std::trunc(value) != value) {
+                    issue_ = ParseIssue::mathematical;
+                    break;
+                }
+                const unsigned operand = static_cast<unsigned>(value);
+                value = 1.0;
+                for (unsigned factor = 2; factor <= operand; ++factor) value *= factor;
+            } else {
+                break;
+            }
         }
         return value;
     }
