@@ -26,6 +26,8 @@
 #include <QMouseEvent>
 #include <QToolButton>
 #include <QWindow>
+#include <QTabWidget>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <array>
@@ -115,9 +117,11 @@ public:
         : QDialog(parent), draft_(settings) {
         setWindowTitle(QStringLiteral("Fast Palette settings"));
         setWindowFlag(Qt::FramelessWindowHint);
+        setWindowFlag(Qt::WindowMinMaxButtonsHint);
         setAttribute(Qt::WA_TranslucentBackground);
         setModal(true);
         setMinimumWidth(520);
+        setMinimumHeight(360);
 
         drain_timer_.setSingleShot(true);
         drain_timer_.setInterval(1200);
@@ -138,14 +142,35 @@ public:
         header->setObjectName("settingsTitleBar");
         header->installEventFilter(this);
         auto* bar = new QHBoxLayout(header);
-        bar->setContentsMargins(24, 16, 16, 8);
-        auto* title = new QLabel("Settings", header);
-        title->setProperty("role", "title");
+        header->setFixedHeight(40);
+        bar->setContentsMargins(14, 0, 0, 0);
+        bar->setSpacing(0);
+        auto* logo = new QLabel(header);
+        logo->setPixmap(ui_icon(UiIcon::logo).pixmap(16,16));
+        logo->setAttribute(Qt::WA_TransparentForMouseEvents);
+        bar->addWidget(logo);bar->addSpacing(10);
+        auto* title = new QLabel("Fast Palette Settings", header);
+        title->setObjectName("settingsCaption");
         title->setAttribute(Qt::WA_TransparentForMouseEvents);
         bar->addWidget(title);
         bar->addStretch();
+        auto* minimize = new QToolButton(header);
+        minimize->setObjectName("minimizeSettings");
+        minimize->setProperty("captionButton",true);
+        minimize->setIcon(ui_icon(UiIcon::minimize));minimize->setFixedSize(46,38);
+        minimize->setAccessibleName("Minimize");minimize->setToolTip("Minimize");
+        bar->addWidget(minimize);
+        connect(minimize,&QToolButton::clicked,this,&QWidget::showMinimized);
+        maximize_ = new QToolButton(header);
+        maximize_->setObjectName("maximizeSettings");
+        maximize_->setProperty("captionButton",true);
+        maximize_->setIcon(ui_icon(UiIcon::maximize));maximize_->setFixedSize(46,38);
+        maximize_->setAccessibleName("Maximize");maximize_->setToolTip("Maximize");
+        bar->addWidget(maximize_);
+        connect(maximize_,&QToolButton::clicked,this,[this]{toggle_maximized();});
         auto* close = new QToolButton(header);
         close->setObjectName("closeSettings");
+        close->setProperty("captionButton",true);close->setFixedSize(46,38);
         close->installEventFilter(this);
         close->setIcon(ui_icon(UiIcon::close));
         close->setAccessibleName("Close settings");
@@ -153,6 +178,9 @@ public:
         bar->addWidget(close);
         connect(close, &QToolButton::clicked, this, &QDialog::reject);
         root->addWidget(header);
+        root->addWidget(separator(surface));
+        auto* tabs = new QTabWidget(surface);
+        tabs->setObjectName("settingsTabs");
         auto* scroll = new QScrollArea(this);
         scroll->setObjectName(QStringLiteral("settingsScrollArea"));
         scroll->setFrameShape(QFrame::NoFrame);
@@ -232,7 +260,22 @@ public:
         content->addStretch();
 
         scroll->setWidget(body);
-        root->addWidget(scroll, 1);
+        tabs->addTab(scroll,"General");
+        auto* search_page = new QWidget(tabs);
+        auto* search_layout = new QVBoxLayout(search_page);
+        search_layout->setContentsMargins(24,16,24,16);search_layout->setSpacing(10);
+        const auto add_source=[&](const char* name,const char* label,bool enabled,const char* hint){
+            auto* checkbox=new QCheckBox(label,search_page);checkbox->setObjectName(name);
+            checkbox->setChecked(enabled);checkbox->setToolTip(hint);search_layout->addWidget(checkbox);return checkbox;
+        };
+        search_apps_=add_source("searchApps","Applications",draft_.search_apps,"Installed and portable applications");
+        search_calculator_=add_source("searchCalculator","Calculator",draft_.search_calculator,"Use = for calculations only");
+        search_settings_=add_source("searchSettings","Windows Settings",draft_.search_settings,"Display, sound, Bluetooth, Windows Update, and more");
+        search_paths_=add_source("searchPaths","Files and folder paths",draft_.search_paths,"Open paths such as %appdata%, %temp%, or C:\\Users");
+        search_everything_=add_source("searchEverything","Everything",draft_.search_everything,"Requires Everything running. Use ? followed by a space for file search only.");
+        auto* everything_hint=new QLabel("Requires Everything running. Use ? for files only.",search_page);
+        everything_hint->setProperty("muted",true);everything_hint->setWordWrap(true);search_layout->addWidget(everything_hint);
+        search_layout->addStretch();tabs->addTab(search_page,"Search");root->addWidget(tabs,1);
 
         auto* footer = new QWidget(this);
         auto* footer_layout = new QVBoxLayout(footer);
@@ -249,7 +292,7 @@ public:
         setSizeGripEnabled(true);
 
         const int available_height = screen() ? screen()->availableGeometry().height() : 760;
-        resize(560, std::max(420, std::min(540, available_height - 48)));
+        resize(600, std::max(420, std::min(640, available_height - 48)));
 
         capture_modifiers_ = 0;
         capture_key_ = 0;
@@ -284,7 +327,21 @@ public:
     }
 
 protected:
+    bool nativeEvent(const QByteArray& type,void* native_message,qintptr* result) override {
+        auto* message=static_cast<MSG*>(native_message);
+        if(message->message==WM_NCHITTEST && !isMaximized()){
+            const QPoint point=mapFromGlobal(QPoint(GET_X_LPARAM(message->lParam),GET_Y_LPARAM(message->lParam)));
+            const bool left=point.x()<6,right=point.x()>=width()-6,top=point.y()<6,bottom=point.y()>=height()-6;
+            if(rect().contains(point) && (left || right || top || bottom)){
+                *result=top?(left?HTTOPLEFT:right?HTTOPRIGHT:HTTOP):bottom?(left?HTBOTTOMLEFT:right?HTBOTTOMRIGHT:HTBOTTOM):left?HTLEFT:HTRIGHT;
+                return true;
+            }
+        }
+        return QDialog::nativeEvent(type,native_message,result);
+    }
     bool eventFilter(QObject* watched, QEvent* event) override {
+        if(watched->objectName()=="settingsTitleBar" && event->type()==QEvent::MouseButtonDblClick){
+            if(static_cast<QMouseEvent*>(event)->button()==Qt::LeftButton){toggle_maximized();return true;}}
         if (watched->objectName() == "closeSettings" && event->type() == QEvent::KeyPress) {
             const auto key = static_cast<QKeyEvent*>(event)->key();
             if (key == Qt::Key_Return || key == Qt::Key_Enter) { reject(); return true; }
@@ -332,6 +389,9 @@ protected:
 
     void changeEvent(QEvent* event) override {
         if (event->type() == QEvent::ActivationChange && !isActiveWindow()) request_capture_stop();
+        if(event->type()==QEvent::WindowStateChange && maximize_){
+            maximize_->setIcon(ui_icon(isMaximized()?UiIcon::restore:UiIcon::maximize));
+            maximize_->setAccessibleName(isMaximized()?"Restore":"Maximize");maximize_->setToolTip(maximize_->accessibleName());}
         QDialog::changeEvent(event);
     }
 
@@ -345,6 +405,7 @@ protected:
     }
 
 private:
+    void toggle_maximized(){if(isMaximized())showNormal();else showMaximized();}
     void set_status(const QString& text) {
         status_->setText(text);
         status_->setVisible(!text.isEmpty());
@@ -424,6 +485,11 @@ private:
             draft_.left_win = left_win_->isChecked();
             draft_.right_win = right_win_->isChecked();
             draft_.start_at_login = start_at_login_->isChecked();
+            draft_.search_apps=search_apps_->isChecked();
+            draft_.search_calculator=search_calculator_->isChecked();
+            draft_.search_settings=search_settings_->isChecked();
+            draft_.search_paths=search_paths_->isChecked();
+            draft_.search_everything=search_everything_->isChecked();
         }
         QDialog::done(result);
     }
@@ -526,6 +592,8 @@ private:
     QPushButton* remove_shortcut_ = nullptr;
     QLabel* status_ = nullptr;
     QCheckBox* start_at_login_ = nullptr;
+    QCheckBox *search_apps_=nullptr,*search_calculator_=nullptr,*search_settings_=nullptr,*search_paths_=nullptr,*search_everything_=nullptr;
+    QToolButton* maximize_=nullptr;
     QListWidget* portable_apps_ = nullptr;
     QPushButton* remove_app_ = nullptr;
     QPushButton* save_button_ = nullptr;

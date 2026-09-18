@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QWidget>
 #include <QToolButton>
+#include <QTabWidget>
 
 #include <chrono>
 #include <cstdlib>
@@ -34,7 +35,9 @@ bool same_settings(const palette::Settings& left, const palette::Settings& right
     return left.left_win == right.left_win && left.right_win == right.right_win &&
         left.start_at_login == right.start_at_login && left.modifiers == right.modifiers &&
         left.key == right.key && left.extra_bindings == right.extra_bindings &&
-        left.portable_apps == right.portable_apps;
+        left.portable_apps == right.portable_apps && left.search_apps==right.search_apps &&
+        left.search_calculator==right.search_calculator && left.search_settings==right.search_settings &&
+        left.search_paths==right.search_paths && left.search_everything==right.search_everything;
 }
 
 template <typename T>
@@ -91,7 +94,7 @@ void test_visual_snapshot() {
                 const QRect button_rect(button->mapTo(dialog, QPoint{}), button->size());
                 require(dialog->rect().contains(button_rect), "short settings dialog keeps footer buttons visible");
             }
-            dialog->resize(560, 540);
+            dialog->resize(600, 640);
             QApplication::processEvents();
             require(scroll->verticalScrollBar()->maximum() == 0,
                 "normal settings dialog shows its full body without scrolling");
@@ -102,6 +105,13 @@ void test_visual_snapshot() {
                     "normal settings dialog keeps portable actions visible");
             }
             require(dialog->grab().save(preview_path(), "PNG"), "settings preview screenshot is written");
+            child<QTabWidget>(dialog,"settingsTabs")->setCurrentIndex(1);
+            QApplication::processEvents();
+            require(dialog->grab().save(preview_path().replace("settings-preview","search-settings-preview"),"PNG"),"search settings preview");
+            child<QToolButton>(dialog,"maximizeSettings")->click();
+            require(dialog->isMaximized(),"maximize caption button works");
+            child<QToolButton>(dialog,"maximizeSettings")->click();
+            require(!dialog->isMaximized(),"restore caption button works");
             require(dialog->windowFlags().testFlag(Qt::FramelessWindowHint), "custom window bar replaces native caption");
             child<QToolButton>(dialog, "closeSettings")->click();
         });
@@ -119,6 +129,8 @@ void test_cancel_discards_staged_changes() {
         child<QCheckBox>(dialog, "leftWin")->setChecked(false);
         child<QCheckBox>(dialog, "rightWin")->setChecked(false);
         child<QCheckBox>(dialog, "startAtLogin")->setChecked(true);
+        child<QCheckBox>(dialog,"searchEverything")->setChecked(true);
+        child<QCheckBox>(dialog,"searchApps")->setChecked(false);
         record_win_r(child<QLineEdit>(dialog, "shortcutRecorder"));
         QTimer::singleShot(10, dialog, [dialog] {
             child<QPushButton>(dialog, "addShortcut")->click();
@@ -136,6 +148,11 @@ void test_save_applies_toggles_and_win_r() {
     palette::Settings value;
 
     with_dialog([](QWidget* dialog) {
+        child<QCheckBox>(dialog,"searchApps")->setChecked(false);
+        child<QCheckBox>(dialog,"searchCalculator")->setChecked(false);
+        child<QCheckBox>(dialog,"searchSettings")->setChecked(false);
+        child<QCheckBox>(dialog,"searchPaths")->setChecked(false);
+        child<QCheckBox>(dialog,"searchEverything")->setChecked(true);
         child<QCheckBox>(dialog, "leftWin")->setChecked(false);
         child<QCheckBox>(dialog, "rightWin")->setChecked(true);
         child<QCheckBox>(dialog, "startAtLogin")->setChecked(true);
@@ -155,6 +172,7 @@ void test_save_applies_toggles_and_win_r() {
     require(palette::show_settings_dialog(nullptr, value), "Save returns true");
     require(!value.left_win && value.right_win && value.start_at_login,
         "Save applies all staged toggles");
+    require(!value.search_apps && !value.search_calculator && !value.search_settings && !value.search_paths && value.search_everything,"Save applies each source toggle");
     require(value.extra_bindings.size() == 1 && value.extra_bindings.front() == palette::Hotkey{MOD_WIN, 'R'},
         "Save applies recorded Win+R binding");
 }

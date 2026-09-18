@@ -147,9 +147,9 @@ HICON load_app_icon(const AppEntry& app) {
     if (app.kind==LaunchKind::shell) {
         PIDLIST_ABSOLUTE pidl=nullptr;
         if (FAILED(SHParseDisplayName(app.target.c_str(),nullptr,&pidl,0,nullptr))) return nullptr;
-        SHGetFileInfoW(reinterpret_cast<LPCWSTR>(pidl),0,&info,sizeof(info),SHGFI_PIDL|SHGFI_ICON|SHGFI_SMALLICON);
+        SHGetFileInfoW(reinterpret_cast<LPCWSTR>(pidl),0,&info,sizeof(info),SHGFI_PIDL|SHGFI_ICON|SHGFI_LARGEICON);
         CoTaskMemFree(pidl);
-    } else SHGetFileInfoW(app.target.c_str(),0,&info,sizeof(info),SHGFI_ICON|SHGFI_SMALLICON);
+    } else SHGetFileInfoW(app.target.c_str(),0,&info,sizeof(info),SHGFI_ICON|SHGFI_LARGEICON);
     return info.hIcon;
 }
 }

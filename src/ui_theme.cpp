@@ -39,8 +39,15 @@ void apply_ui_theme() {
     qApp->setStyleSheet(QString(R"(
         QWidget { color:%1; }
         QFrame#paletteSurface, QFrame#settingsSurface { background:%2; border:1px solid %4; border-radius:12px; }
-        QToolButton#closeSettings { background:transparent; border:none; padding:8px; }
-        QToolButton#closeSettings:hover { background:%6; }
+        QLabel#settingsCaption { font-size:13px; }
+        QToolButton[captionButton="true"] { background:transparent; border:none; border-radius:0; padding:0; }
+        QToolButton[captionButton="true"]:hover { background:%6; }
+        QToolButton#closeSettings:hover { background:#b03939; }
+        QTabWidget::pane { border:none; }
+        QTabBar { background:transparent; }
+        QTabBar::tab { background:transparent; color:%3; padding:12px 24px; border-bottom:2px solid transparent; }
+        QTabBar::tab:selected { color:%1; border-bottom-color:%1; }
+        QTabBar::tab:hover { background:%6; }
         QFrame[role="separator"] { background:%4; border:none; min-height:1px; max-height:1px; }
         QLabel { background:transparent; }
         QLabel[muted="true"] { color:%3; }
@@ -91,6 +98,11 @@ QIcon ui_icon(UiIcon kind) {
         p.setPen(QPen(ink,1.7,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));p.setBrush(Qt::NoBrush);
         if(kind==UiIcon::search) {p.drawEllipse(QPointF(10,10),6,6);p.drawLine(QPointF(14.5,14.5),QPointF(20,20));}
         else if(kind==UiIcon::close) {p.drawLine(6,6,18,18);p.drawLine(18,6,6,18);}
+        else if(kind==UiIcon::minimize) {p.drawLine(5,12,19,12);}
+        else if(kind==UiIcon::maximize) {p.drawRect(QRectF(5,5,14,14));}
+        else if(kind==UiIcon::restore) {p.drawRect(QRectF(5,8,11,11));p.drawLine(8,5,19,5);p.drawLine(19,5,19,16);}
+        else if(kind==UiIcon::folder) {p.drawPolygon(QPolygonF({{3,6},{10,6},{12,9},{21,9},{21,20},{3,20}}));}
+        else if(kind==UiIcon::file) {p.drawPolygon(QPolygonF({{6,3},{14,3},{19,8},{19,21},{6,21}}));p.drawLine(14,3,14,8);p.drawLine(14,8,19,8);}
         else if(kind==UiIcon::settings) {
             p.drawEllipse(QPointF(12,12),6,6);p.drawEllipse(QPointF(12,12),2,2);
             for(int i=0;i<8;++i){const double a=i*3.14159265/4;p.drawLine(QPointF(12+6*std::cos(a),12+6*std::sin(a)),QPointF(12+9*std::cos(a),12+9*std::sin(a)));}

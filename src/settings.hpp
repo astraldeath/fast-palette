@@ -13,6 +13,11 @@ struct Settings {
     bool left_win = true;
     bool right_win = true;
     bool start_at_login = false;
+    bool search_apps = true;
+    bool search_calculator = true;
+    bool search_settings = true;
+    bool search_paths = true;
+    bool search_everything = false;
     UINT modifiers = MOD_CONTROL | MOD_ALT;
     UINT key = VK_SPACE;
     std::vector<Hotkey> extra_bindings;

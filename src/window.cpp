@@ -1,5 +1,6 @@
 #include "window.hpp"
 #include "catalog.hpp"
+#include "providers.hpp"
 #include "ui_theme.hpp"
 #include "win_util.hpp"
 #include <QApplication>
@@ -36,7 +37,7 @@ constexpr int hotkey_id=1000;
 constexpr int row_height=58;
 QString qs(const std::wstring& value){return QString::fromStdWString(value);}
 }
-PaletteWindow::PaletteWindow():QWidget(nullptr,Qt::Tool|Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint),settings_(load_settings()) {
+PaletteWindow::PaletteWindow(Settings settings):QWidget(nullptr,Qt::Tool|Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint),settings_(std::move(settings)) {
     setObjectName("paletteRoot");setWindowTitle("Fast Palette");
     // Qt commits this translucent backing store as a complete frame. There is
     // no unpainted white Win32 client surface between show and first WM_PAINT.
@@ -49,8 +50,8 @@ PaletteWindow::PaletteWindow():QWidget(nullptr,Qt::Tool|Qt::FramelessWindowHint|
     auto* contents=new QVBoxLayout(surface);contents->setContentsMargins(12,12,12,9);contents->setSpacing(7);
     auto* header=new QHBoxLayout;header->setContentsMargins(9,5,2,5);header->setSpacing(13);
     search_icon_=new QLabel(surface);search_icon_->setPixmap(ui_icon(UiIcon::search).pixmap(22,22));header->addWidget(search_icon_);
-    edit_=new QLineEdit(surface);edit_->setObjectName("queryInput");edit_->setAccessibleName("Search apps or calculate");
-    edit_->setPlaceholderText("Search apps or calculate");edit_->setMaxLength(4096);header->addWidget(edit_,1);
+    edit_=new QLineEdit(surface);edit_->setObjectName("queryInput");edit_->setAccessibleName("Search or calculate");
+    edit_->setPlaceholderText("Search or calculate");edit_->setMaxLength(4096);header->addWidget(edit_,1);
     settings_button_=new QToolButton(surface);settings_button_->setObjectName("settingsButton");
     settings_button_->setIcon(ui_icon(UiIcon::settings));settings_button_->setIconSize(QSize(21,21));
     settings_button_->setToolTip("Settings");settings_button_->setAccessibleName("Settings");header->addWidget(settings_button_);
@@ -62,7 +63,9 @@ PaletteWindow::PaletteWindow():QWidget(nullptr,Qt::Tool|Qt::FramelessWindowHint|
     QFont small_font=footer_->font();small_font.setPixelSize(11);footer_->setFont(small_font);footer_->setContentsMargins(10,3,10,2);contents->addWidget(footer_);
     setTabOrder(edit_,list_);setTabOrder(list_,settings_button_);
     edit_->installEventFilter(this);list_->installEventFilter(this);settings_button_->installEventFilter(this);
-    connect(edit_,&QLineEdit::textChanged,this,[this](const QString& value){query_=value.toStdWString();set_notice({});update_results();});
+    source_timer_=new QTimer(this);source_timer_->setSingleShot(true);source_timer_->setInterval(70);
+    connect(source_timer_,&QTimer::timeout,this,[this]{request_sources();});
+    connect(edit_,&QLineEdit::textChanged,this,[this](const QString& value){query_=value.toStdWString();set_notice({});schedule_sources();update_results();});
     connect(edit_,&QLineEdit::returnPressed,this,[this]{activate();});
     connect(list_,&QListWidget::itemActivated,this,[this](QListWidgetItem*){activate();});
     connect(settings_button_,&QToolButton::clicked,this,[this]{edit_settings();});
@@ -72,6 +75,7 @@ PaletteWindow::PaletteWindow():QWidget(nullptr,Qt::Tool|Qt::FramelessWindowHint|
 }
 PaletteWindow::~PaletteWindow() {
     if(keyboard_)keyboard_->stop();
+    ++source_generation_;source_worker_.stop();
     worker_.stop();
     if(shell_notify_)SHChangeNotifyDeregister(shell_notify_);
     if(host_){WTSUnRegisterSessionNotification(host_);unregister_bindings();DestroyWindow(host_);}
@@ -171,14 +175,32 @@ void PaletteWindow::update_results(bool preserve) {
     std::wstring old;
     const int current=list_->currentRow();if(preserve && current>=0 && static_cast<size_t>(current)<rows_.size())old=rows_[current].identity;
     rows_.clear();
-    const auto calc=calculate(query_);const auto first=query_.find_first_not_of(L" \t\r\n");
-    const bool forced=first!=std::wstring::npos && query_[first]==L'=';
-    const auto hits=forced?std::vector<SearchHit>{}:search(apps_,query_,7);
+    const auto calc=settings_.search_calculator?calculate(query_):CalcResult{};const auto first=query_.find_first_not_of(L" \t\r\n");
+    const bool forced=first!=std::wstring::npos && query_[first]==L'=' && settings_.search_calculator;
+    const bool files_only=query_.starts_with(L"? ") && settings_.search_everything;
+    std::vector<AppEntry> candidates;
+    candidates.reserve(14);
+    const auto collect=[&](const std::vector<AppEntry>& entries){for(const auto& hit:search(entries,query_,7))candidates.push_back(entries[hit.index]);};
+    if(!forced && !files_only && settings_.search_apps)collect(apps_);
+    if(!forced && !files_only && settings_.search_settings && first!=std::wstring::npos)collect(windows_settings());
+    const auto hits=forced?std::vector<SearchHit>{}:search(candidates,query_,7);
     if(calc.status==CalcStatus::value)rows_.push_back({calc.text,L"Enter to copy",{},true,L"calculation"});
     else if(calc.status==CalcStatus::error && hits.empty())rows_.push_back({calc.text,L"Check the expression",{},false,L"error"});
     else if(calc.status==CalcStatus::incomplete && hits.empty())rows_.push_back({L"Keep typing",L"Incomplete expression",{},false,L"incomplete"});
-    for(const auto& hit:hits){const auto& app=apps_[hit.index];rows_.push_back({app.name,app.detail,hit.index,false,app.id});}
-    if(rows_.empty())rows_.push_back({loading_?L"Finding applications...":L"No applications found",loading_?L"The index is being built":L"Try another name or add a portable application in Settings",{},false,L"empty"});
+    if(!forced){
+        for(const auto& entry:source_results_)if(entry.source==SearchSource::path)rows_.push_back({entry.name,entry.detail,entry,false,entry.id});
+        const auto file_count=std::count_if(source_results_.begin(),source_results_.end(),[](const auto& e){return e.source==SearchSource::file;});
+        const size_t local_limit=file_count?5:7;
+        for(const auto& hit:hits){if(rows_.size()>=local_limit)break;const auto& app=candidates[hit.index];rows_.push_back({app.name,app.detail,app,false,app.id});}
+        for(const auto& entry:source_results_){if(rows_.size()>=7)break;if(entry.source!=SearchSource::file)continue;
+            if(std::none_of(rows_.begin(),rows_.end(),[&](const auto& row){return row.identity==entry.id;}))rows_.push_back({entry.name,entry.detail,entry,false,entry.id});}
+    }
+    if(rows_.empty()){
+        const bool waiting=sources_pending_ || (loading_ && settings_.search_apps && !files_only);
+        const bool missing=files_only && !everything_available_ && !waiting;
+        const bool empty_files=files_only && QString::fromStdWString(query_.substr(2)).trimmed().isEmpty();
+        rows_.push_back({empty_files?L"Type a filename":missing?L"Open Everything to search files":waiting?L"Searching...":L"No results",{}, {},false,L"empty"});
+    }
     list_->setUpdatesEnabled(false);list_->clear();int selected=0;
     for(size_t i=0;i<rows_.size();++i) {
         const auto& row=rows_[i];auto* item=new QListWidgetItem(list_);
@@ -187,7 +209,7 @@ void PaletteWindow::update_results(bool preserve) {
         item->setSizeHint(QSize(0,row_height));item->setData(Qt::AccessibleTextRole,qs(row.title)+" "+qs(row.detail));
         auto* content=new QWidget(list_);content->setObjectName("resultRow");content->setAttribute(Qt::WA_TransparentForMouseEvents);
         auto* horizontal=new QHBoxLayout(content);horizontal->setContentsMargins(12,7,12,7);horizontal->setSpacing(13);
-        auto* icon=new QLabel(content);icon->setObjectName("resultIcon");icon->setFixedSize(25,25);horizontal->addWidget(icon);
+        auto* icon=new QLabel(content);icon->setObjectName("resultIcon");icon->setFixedSize(32,32);icon->setAlignment(Qt::AlignCenter);horizontal->addWidget(icon);
         auto* labels=new QVBoxLayout;labels->setContentsMargins(0,0,0,0);labels->setSpacing(2);
         auto* title=new QLabel(content);title->setTextFormat(Qt::PlainText);QFont font=title->font();font.setPixelSize(row.copy?21:15);title->setFont(font);
         title->setText(title->fontMetrics().elidedText(qs(row.title),Qt::ElideRight,width()-104));title->setMinimumWidth(0);labels->addWidget(title);
@@ -209,9 +231,11 @@ void PaletteWindow::update_icons() {
     for(int i=0;i<list_->count();++i) {
         auto* widget=list_->itemWidget(list_->item(i));auto* label=widget?widget->findChild<QLabel*>("resultIcon"):nullptr;if(!label)continue;
         const auto& row=rows_[static_cast<size_t>(i)];QIcon icon;
-        if(row.app)icon=icons_.value(qs(apps_[*row.app].id));
+        if(row.app)icon=icons_.value(qs(row.app->id));
+        if(row.app && row.app->source==SearchSource::windows_settings)icon=ui_icon(UiIcon::settings);
+        if(row.app && (row.app->source==SearchSource::path || row.app->source==SearchSource::file))icon=ui_icon(row.app->is_folder?UiIcon::folder:UiIcon::file);
         if(icon.isNull())icon=ui_icon(row.copy?UiIcon::calculator:UiIcon::application);
-        label->setPixmap(icon.pixmap(24,24));
+        label->setPixmap(icon.pixmap(label->size()));
     }
 }
 bool PaletteWindow::clipboard(const std::wstring& value) {
@@ -224,20 +248,43 @@ void PaletteWindow::activate() {
     const int selected=list_->currentRow();if(selected<0 || static_cast<size_t>(selected)>=rows_.size() || launching_)return;
     const auto row=rows_[selected];
     if(row.copy){if(clipboard(row.title))dismiss(true);else set_notice("Clipboard is busy. Press Enter to try again.");}
-    else if(row.app){launching_=true;set_notice("Opening "+qs(row.title)+"...");const auto app=apps_[*row.app];
+    else if(row.app){launching_=true;set_notice("Opening "+qs(row.title)+"...");const auto app=*row.app;
         worker_.enqueue([this,app](std::stop_token stop){if(stop.stop_requested())return;LaunchReply reply{};reply.id=app.id;reply.ok=launch_app(app,reply.error);
             {std::lock_guard lock(inbox_mutex_);pending_launch_=std::move(reply);}PostMessageW(host_,msg_launch,0,0);},true);
     }
 }
 void PaletteWindow::request_catalog() {
+    if(!settings_.search_apps){apps_.clear();update_results(true);return;}
     if(loading_){refresh_again_=true;return;}loading_=true;
     worker_.enqueue([this](std::stop_token stop){auto apps=discover_apps(stop);if(stop.stop_requested())return;
         {std::lock_guard lock(inbox_mutex_);pending_apps_=std::move(apps);}PostMessageW(host_,msg_catalog,0,0);});
 }
 void PaletteWindow::request_icons() {
-    for(const auto& row:rows_)if(row.app){const auto app=apps_[*row.app];if(!requested_icons_.insert(app.id).second)continue;
+    for(const auto& row:rows_)if(row.app){const auto app=*row.app;if(app.source!=SearchSource::application || !requested_icons_.insert(app.id).second)continue;
         worker_.enqueue([this,app](std::stop_token stop){if(stop.stop_requested())return;ComApartment apartment;const auto icon=load_app_icon(app);
             {std::lock_guard lock(inbox_mutex_);pending_icons_.emplace_back(app.id,icon);}PostMessageW(host_,msg_icons,0,0);});}
+}
+void PaletteWindow::schedule_sources() {
+    ++source_generation_;source_timer_->stop();source_results_.clear();everything_available_=true;
+    const auto trimmed=QString::fromStdWString(query_).trimmed();
+    const bool forced=trimmed.startsWith('=') && settings_.search_calculator;
+    sources_pending_=!trimmed.isEmpty() && !forced &&
+        ((settings_.search_paths && !expand_path_query(query_).empty()) || settings_.search_everything);
+    if(sources_pending_)source_timer_->start();
+}
+void PaletteWindow::request_sources() {
+    const auto generation=source_generation_.load();const auto query=query_;const auto settings=settings_;
+    source_worker_.enqueue([this,generation,query,settings](std::stop_token stop){
+        const auto cancelled=[&]{return stop.stop_requested() || generation!=source_generation_.load();};
+        if(cancelled())return;SourceReply reply{generation,{}};
+        if(settings.search_paths)reply.entries=path_results(query);
+        if(cancelled())return;
+        if(settings.search_everything){const auto text=query.starts_with(L"? ")?query.substr(2):query;
+            auto files=query_everything(everything_window(),text,cancelled);reply.everything_available=files.available;
+            for(auto& entry:files.entries)reply.entries.push_back(std::move(entry));}
+        if(cancelled())return;
+        {std::lock_guard lock(inbox_mutex_);pending_sources_=std::move(reply);}PostMessageW(host_,msg_sources,0,0);
+    });
 }
 void PaletteWindow::edit_settings() {
     settings_open_=true;unregister_bindings();
@@ -247,7 +294,7 @@ void PaletteWindow::edit_settings() {
         std::wstring error;const bool registered=register_bindings(draft);if(!registered)error=L"That shortcut is already in use. Choose another.";
         bool hook=false;if(registered){hook=keyboard_->start(draft.left_win,draft.right_win,all_hotkeys(draft));if(!hook)error=L"Could not install the Windows-key hook.";}
         const bool login=registered && hook && (draft.start_at_login==settings_.start_at_login || set_start_at_login(draft.start_at_login,error));
-        if(login && save_settings(draft,error)){settings_=std::move(draft);hotkey_registered_=true;set_notice({});request_catalog();}
+        if(login && save_settings(draft,error)){settings_=std::move(draft);hotkey_registered_=true;set_notice({});schedule_sources();update_results();request_catalog();}
         else {unregister_bindings();hotkey_registered_=register_bindings(settings_);keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));
             if(login && draft.start_at_login!=settings_.start_at_login){std::wstring ignored;set_start_at_login(settings_.start_at_login,ignored);}
             QMessageBox::warning(this,"Settings could not be saved",qs(error));}
@@ -269,6 +316,9 @@ LRESULT CALLBACK PaletteWindow::window_proc(HWND window,UINT message,WPARAM w,LP
 LRESULT PaletteWindow::message(UINT message,WPARAM w,LPARAM l) {
     if(registered_invoke_ && message==registered_invoke_){show();return 0;}
     switch(message){
+    case msg_sources:{
+        std::optional<SourceReply> reply;{std::lock_guard lock(inbox_mutex_);reply=std::move(pending_sources_);pending_sources_.reset();}
+        if(reply && reply->generation==source_generation_.load()){source_results_=std::move(reply->entries);everything_available_=reply->everything_available;sources_pending_=false;update_results(true);}return 0;}
     case msg_invoke:case WM_HOTKEY:if(isVisible()&&!settings_open_)dismiss(true);else show();return 0;
     case msg_exit:qApp->quit();return 0;
     case WM_SETTINGCHANGE:apply_ui_theme();update_icons();return 0;

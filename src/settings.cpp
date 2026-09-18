@@ -30,6 +30,11 @@ Settings load_settings(const wchar_t* path) {
     s.left_win=read_dword(key.value,L"LeftWin",1)!=0;
     s.right_win=read_dword(key.value,L"RightWin",1)!=0;
     s.start_at_login=read_dword(key.value,L"StartAtLogin",0)!=0;
+    s.search_apps=read_dword(key.value,L"SearchApps",1)!=0;
+    s.search_calculator=read_dword(key.value,L"SearchCalculator",1)!=0;
+    s.search_settings=read_dword(key.value,L"SearchSettings",1)!=0;
+    s.search_paths=read_dword(key.value,L"SearchPaths",1)!=0;
+    s.search_everything=read_dword(key.value,L"SearchEverything",0)!=0;
     const auto mods=read_dword(key.value,L"Modifiers",s.modifiers), vk=read_dword(key.value,L"Key",s.key);
     if (valid_hotkey(mods,vk)) { s.modifiers=mods; s.key=vk; }
     std::array<Hotkey,15> extra{}; DWORD extra_bytes=sizeof(extra);
@@ -66,7 +71,9 @@ bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) 
     paths.push_back(0); if (paths.size()==1) paths.push_back(0);
     status=RegSetValueExW(key.value,L"PortableApps",0,REG_MULTI_SZ,reinterpret_cast<const BYTE*>(paths.data()),static_cast<DWORD>(paths.size()*sizeof(wchar_t)));
     if(status==ERROR_SUCCESS) status=RegSetValueExW(key.value,L"ExtraBindings",0,REG_BINARY,reinterpret_cast<const BYTE*>(s.extra_bindings.data()),static_cast<DWORD>(s.extra_bindings.size()*sizeof(Hotkey)));
-    const std::pair<const wchar_t*,DWORD> values[]={ {L"LeftWin",s.left_win},{L"RightWin",s.right_win},{L"StartAtLogin",s.start_at_login},{L"Modifiers",s.modifiers},{L"Key",s.key} };
+    const std::pair<const wchar_t*,DWORD> values[]={ {L"LeftWin",s.left_win},{L"RightWin",s.right_win},{L"StartAtLogin",s.start_at_login},{L"Modifiers",s.modifiers},{L"Key",s.key},
+        {L"SearchApps",s.search_apps},{L"SearchCalculator",s.search_calculator},{L"SearchSettings",s.search_settings},
+        {L"SearchPaths",s.search_paths},{L"SearchEverything",s.search_everything} };
     for (const auto& [name,value]:values) if (status==ERROR_SUCCESS) status=RegSetValueExW(key.value,name,0,REG_DWORD,reinterpret_cast<const BYTE*>(&value),sizeof(value));
     if (status!=ERROR_SUCCESS) { error=system_error(status); return false; }
     return true;
