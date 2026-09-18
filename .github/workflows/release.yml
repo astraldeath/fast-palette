@@ -37,13 +37,12 @@ jobs:
           }
           "RELEASE_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
 
-      - name: Identify build image
-        run: '"QT_CACHE_IMAGE=$env:ImageVersion" >> $env:GITHUB_ENV'
-
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: build/deps
-          key: qt-${{ runner.os }}-${{ runner.arch }}-${{ env.QT_CACHE_IMAGE }}-${{ hashFiles('tools/build-qt.ps1') }}
+          key: qt-${{ runner.os }}-${{ runner.arch }}-vs2022-${{ hashFiles('tools/build-qt.ps1') }}
+          # Migrate the existing VS 2022 cache without another Qt rebuild.
+          restore-keys: qt-${{ runner.os }}-${{ runner.arch }}-20260907.297.1-${{ hashFiles('tools/build-qt.ps1') }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: github.ref == 'refs/heads/main'
