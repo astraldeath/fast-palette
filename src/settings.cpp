@@ -2,6 +2,7 @@
 #include "win_util.hpp"
 #include <algorithm>
 #include <array>
+#include <cwctype>
 
 namespace palette {
 namespace {
@@ -24,17 +25,26 @@ bool valid_hotkey(UINT mods, UINT key) {
     return key!=VK_SHIFT && key!=VK_CONTROL && key!=VK_MENU && key!=VK_LSHIFT && key!=VK_RSHIFT &&
         key!=VK_LCONTROL && key!=VK_RCONTROL && key!=VK_LMENU && key!=VK_RMENU;
 }
+bool valid_everything_prefix(std::wstring_view prefix) {
+    return !prefix.empty() && prefix.size()<=16 && prefix.front()!=L'=' &&
+        std::none_of(prefix.begin(),prefix.end(),[](wchar_t c){return iswspace(c) || iswcntrl(c);});
+}
 Settings load_settings(const wchar_t* path) {
     Settings s; RegistryKey key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER,path,0,KEY_QUERY_VALUE,&key.value)!=ERROR_SUCCESS) return s;
     s.left_win=read_dword(key.value,L"LeftWin",1)!=0;
     s.right_win=read_dword(key.value,L"RightWin",1)!=0;
     s.start_at_login=read_dword(key.value,L"StartAtLogin",0)!=0;
+    s.automatic_updates=read_dword(key.value,L"AutomaticUpdates",1)!=0;
     s.search_apps=read_dword(key.value,L"SearchApps",1)!=0;
     s.search_calculator=read_dword(key.value,L"SearchCalculator",1)!=0;
     s.search_settings=read_dword(key.value,L"SearchSettings",1)!=0;
     s.search_paths=read_dword(key.value,L"SearchPaths",1)!=0;
     s.search_everything=read_dword(key.value,L"SearchEverything",0)!=0;
+    s.everything_prefix_only=read_dword(key.value,L"EverythingPrefixOnly",0)!=0;
+    std::array<wchar_t,18> prefix{};DWORD prefix_bytes=sizeof(prefix);
+    if(RegGetValueW(key.value,nullptr,L"EverythingPrefix",RRF_RT_REG_SZ,nullptr,prefix.data(),&prefix_bytes)==ERROR_SUCCESS && valid_everything_prefix(prefix.data()))
+        s.everything_prefix=prefix.data();
     const auto mods=read_dword(key.value,L"Modifiers",s.modifiers), vk=read_dword(key.value,L"Key",s.key);
     if (valid_hotkey(mods,vk)) { s.modifiers=mods; s.key=vk; }
     std::array<Hotkey,15> extra{}; DWORD extra_bytes=sizeof(extra);
@@ -55,6 +65,7 @@ Settings load_settings(const wchar_t* path) {
     return s;
 }
 bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) {
+    if(!valid_everything_prefix(s.everything_prefix)){error=L"Use a prefix of 1–16 characters without spaces, not starting with =.";return false;}
     if (!valid_hotkey(s.modifiers,s.key)) { error=L"Choose a key with Ctrl, Alt, Shift, or Win. Win+L and F12 are reserved."; return false; }
     const auto bindings=all_hotkeys(s);
     if(bindings.size()>16) {error=L"Up to 16 keyboard shortcuts are supported.";return false;}
@@ -71,9 +82,10 @@ bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) 
     paths.push_back(0); if (paths.size()==1) paths.push_back(0);
     status=RegSetValueExW(key.value,L"PortableApps",0,REG_MULTI_SZ,reinterpret_cast<const BYTE*>(paths.data()),static_cast<DWORD>(paths.size()*sizeof(wchar_t)));
     if(status==ERROR_SUCCESS) status=RegSetValueExW(key.value,L"ExtraBindings",0,REG_BINARY,reinterpret_cast<const BYTE*>(s.extra_bindings.data()),static_cast<DWORD>(s.extra_bindings.size()*sizeof(Hotkey)));
+    if(status==ERROR_SUCCESS)status=RegSetValueExW(key.value,L"EverythingPrefix",0,REG_SZ,reinterpret_cast<const BYTE*>(s.everything_prefix.c_str()),static_cast<DWORD>((s.everything_prefix.size()+1)*sizeof(wchar_t)));
     const std::pair<const wchar_t*,DWORD> values[]={ {L"LeftWin",s.left_win},{L"RightWin",s.right_win},{L"StartAtLogin",s.start_at_login},{L"Modifiers",s.modifiers},{L"Key",s.key},
         {L"SearchApps",s.search_apps},{L"SearchCalculator",s.search_calculator},{L"SearchSettings",s.search_settings},
-        {L"SearchPaths",s.search_paths},{L"SearchEverything",s.search_everything} };
+        {L"SearchPaths",s.search_paths},{L"SearchEverything",s.search_everything},{L"EverythingPrefixOnly",s.everything_prefix_only},{L"AutomaticUpdates",s.automatic_updates} };
     for (const auto& [name,value]:values) if (status==ERROR_SUCCESS) status=RegSetValueExW(key.value,name,0,REG_DWORD,reinterpret_cast<const BYTE*>(&value),sizeof(value));
     if (status!=ERROR_SUCCESS) { error=system_error(status); return false; }
     return true;

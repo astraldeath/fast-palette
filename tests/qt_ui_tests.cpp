@@ -21,7 +21,7 @@ int main(int argc,char** argv) {
     QApplication::setStyle("Fusion");palette::apply_ui_theme();
     int failed=0;
     const auto check=[&](bool value,const char* name){if(!value){++failed;std::cerr<<"FAIL: "<<name<<'\n';}};
-    palette::Settings test_settings;test_settings.search_everything=true;
+    palette::Settings test_settings;test_settings.search_everything=true;test_settings.automatic_updates=false;
     palette::PaletteWindow window(test_settings);
     check(window.create(GetModuleHandleW(nullptr),true),"framework window created");
     auto* input=window.findChild<QLineEdit*>("queryInput");

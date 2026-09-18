@@ -1,10 +1,13 @@
 #pragma once
 #include "model.hpp"
+#include "settings.hpp"
 #include <windows.h>
 #include <functional>
 #include <span>
 #include <cstddef>
 namespace palette {
+struct EverythingQuery { bool enabled=false,exclusive=false; std::wstring text; };
+EverythingQuery route_everything(std::wstring_view query,const Settings& settings);
 const std::vector<AppEntry>& windows_settings();
 std::wstring expand_path_query(std::wstring_view query);
 std::vector<AppEntry> path_results(std::wstring_view query);

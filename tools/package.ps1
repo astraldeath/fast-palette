@@ -182,7 +182,7 @@ qt_add_executable(FastPalette WIN32
 set_target_properties(FastPalette PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(FastPalette PRIVATE
   palette_ui palette_platform palette_keyboard palette_core
-  Qt6::Widgets wtsapi32 shell32 ole32 propsys advapi32 user32 uuid)
+  Qt6::Widgets wtsapi32 winhttp version shell32 ole32 propsys advapi32 user32 uuid)
 qt_import_plugins(FastPalette INCLUDE Qt6::QWindowsIntegrationPlugin)
 '@ | Set-Content -LiteralPath (Join-Path $Directory 'CMakeLists.txt') -Encoding utf8
 

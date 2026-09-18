@@ -56,6 +56,8 @@ int main(int argc, char** argv) {
     Settings desired; desired.left_win=false; desired.modifiers=MOD_CONTROL|MOD_SHIFT; desired.key='P';
     desired.extra_bindings={{MOD_ALT,VK_SPACE},{MOD_CONTROL|MOD_ALT,'K'},{MOD_WIN,'R'}};
     desired.search_apps=false;desired.search_calculator=false;desired.search_settings=false;desired.search_paths=false;desired.search_everything=true;
+    desired.everything_prefix_only=true;desired.everything_prefix=L"ef";
+    desired.automatic_updates=false;
     desired.portable_apps={L"C:\\Program Files\\Example\\example.exe", L"C:\\Portable\\éditeur.exe"};
     std::wstring error;
     check(save_settings(desired,error,key.c_str()), "settings save");
@@ -64,6 +66,9 @@ int main(int argc, char** argv) {
     check(actual.portable_apps==desired.portable_apps, "portable Unicode paths roundtrip");
     check(actual.extra_bindings==desired.extra_bindings, "multiple keybindings roundtrip");
     check(!actual.search_apps && !actual.search_calculator && !actual.search_settings && !actual.search_paths && actual.search_everything,"independent source toggles roundtrip");
+    check(actual.everything_prefix_only && actual.everything_prefix==L"ef","Everything prefix options roundtrip");
+    check(defaults.automatic_updates && !actual.automatic_updates,"automatic update preference persists");
+    check(!valid_everything_prefix(L"") && !valid_everything_prefix(L"a b") && !valid_everything_prefix(L"="),"invalid prefixes rejected");
     check(!valid_hotkey(0,'A') && !valid_hotkey(MOD_CONTROL,VK_F12) && !valid_hotkey(MOD_WIN,'L'), "reject unmodified and reserved combinations");
     check(valid_hotkey(MOD_CONTROL|MOD_ALT,VK_SPACE), "accept configured combination");
     check(valid_hotkey(MOD_WIN|MOD_SHIFT,'P'), "accept Windows modifier combinations");

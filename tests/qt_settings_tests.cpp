@@ -37,7 +37,8 @@ bool same_settings(const palette::Settings& left, const palette::Settings& right
         left.key == right.key && left.extra_bindings == right.extra_bindings &&
         left.portable_apps == right.portable_apps && left.search_apps==right.search_apps &&
         left.search_calculator==right.search_calculator && left.search_settings==right.search_settings &&
-        left.search_paths==right.search_paths && left.search_everything==right.search_everything;
+        left.search_paths==right.search_paths && left.search_everything==right.search_everything &&
+        left.everything_prefix_only==right.everything_prefix_only && left.everything_prefix==right.everything_prefix && left.automatic_updates==right.automatic_updates;
 }
 
 template <typename T>
@@ -130,6 +131,8 @@ void test_cancel_discards_staged_changes() {
         child<QCheckBox>(dialog, "rightWin")->setChecked(false);
         child<QCheckBox>(dialog, "startAtLogin")->setChecked(true);
         child<QCheckBox>(dialog,"searchEverything")->setChecked(true);
+        child<QCheckBox>(dialog,"everythingPrefixOnly")->setChecked(true);
+        child<QLineEdit>(dialog,"everythingPrefix")->setText("ef");
         child<QCheckBox>(dialog,"searchApps")->setChecked(false);
         record_win_r(child<QLineEdit>(dialog, "shortcutRecorder"));
         QTimer::singleShot(10, dialog, [dialog] {
@@ -148,6 +151,11 @@ void test_save_applies_toggles_and_win_r() {
     palette::Settings value;
 
     with_dialog([](QWidget* dialog) {
+        child<QCheckBox>(dialog,"automaticUpdates")->setChecked(false);
+        child<QCheckBox>(dialog,"everythingPrefixOnly")->setChecked(true);
+        child<QLineEdit>(dialog,"everythingPrefix")->setText("");
+        require(!child<QPushButton>(dialog,"saveButton")->isEnabled(),"empty prefix cannot be saved");
+        child<QLineEdit>(dialog,"everythingPrefix")->setText("ef");
         child<QCheckBox>(dialog,"searchApps")->setChecked(false);
         child<QCheckBox>(dialog,"searchCalculator")->setChecked(false);
         child<QCheckBox>(dialog,"searchSettings")->setChecked(false);
@@ -173,6 +181,8 @@ void test_save_applies_toggles_and_win_r() {
     require(!value.left_win && value.right_win && value.start_at_login,
         "Save applies all staged toggles");
     require(!value.search_apps && !value.search_calculator && !value.search_settings && !value.search_paths && value.search_everything,"Save applies each source toggle");
+    require(value.everything_prefix_only && value.everything_prefix==L"ef","Save applies Everything prefix options");
+    require(!value.automatic_updates,"Save applies automatic update preference");
     require(value.extra_bindings.size() == 1 && value.extra_bindings.front() == palette::Hotkey{MOD_WIN, 'R'},
         "Save applies recorded Win+R binding");
 }
@@ -228,6 +238,15 @@ int main(int argc, char** argv) {
     test_save_applies_toggles_and_win_r();
     test_escape_cancels_recording_not_dialog();
     test_missing_release_does_not_block_cancel();
+    palette::Settings update_settings;int checks=0;
+    with_dialog([](QWidget* dialog){
+        child<QTabWidget>(dialog,"settingsTabs")->setCurrentIndex(2);
+        child<QPushButton>(dialog,"checkUpdates")->click();
+        child<QCheckBox>(dialog,"automaticUpdates")->setChecked(false);
+        child<QPushButton>(dialog,"cancelButton")->click();
+    });
+    require(!palette::show_settings_dialog(nullptr,update_settings,[&checks](std::function<void()> completed){++checks;completed();}),"update settings Cancel works");
+    require(checks==1 && update_settings.automatic_updates,"manual update action works and Cancel preserves automatic preference");
     std::cout << "Qt settings tests passed\n";
     return 0;
 }

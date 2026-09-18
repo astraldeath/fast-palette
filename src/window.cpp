@@ -1,6 +1,7 @@
 #include "window.hpp"
 #include "catalog.hpp"
 #include "providers.hpp"
+#include "updater.hpp"
 #include "ui_theme.hpp"
 #include "win_util.hpp"
 #include <QApplication>
@@ -74,6 +75,7 @@ PaletteWindow::PaletteWindow(Settings settings):QWidget(nullptr,Qt::Tool|Qt::Fra
     set_notice({});
 }
 PaletteWindow::~PaletteWindow() {
+    updater_.reset();
     if(keyboard_)keyboard_->stop();
     ++source_generation_;source_worker_.stop();
     worker_.stop();
@@ -98,6 +100,9 @@ bool PaletteWindow::create(HINSTANCE instance,bool background) {
     menu->addAction("Open Fast Palette",this,[this]{show();});
     menu->addAction("Settings",this,[this]{show();edit_settings();});
     menu->addAction("Refresh applications",this,[this]{request_catalog();});
+    updater_=std::make_unique<Updater>(this,[this]{return !isVisible() && !settings_open_ && !QApplication::activeModalWidget();});
+    menu->addAction("Check for updates",this,[this]{updater_->check();});
+    updater_->set_automatic(settings_.automatic_updates);
     menu->addAction("About and licenses",this,[this]{
         if(settings_open_)return;
         settings_open_=true;
@@ -175,9 +180,10 @@ void PaletteWindow::update_results(bool preserve) {
     std::wstring old;
     const int current=list_->currentRow();if(preserve && current>=0 && static_cast<size_t>(current)<rows_.size())old=rows_[current].identity;
     rows_.clear();
-    const auto calc=settings_.search_calculator?calculate(query_):CalcResult{};const auto first=query_.find_first_not_of(L" \t\r\n");
-    const bool forced=first!=std::wstring::npos && query_[first]==L'=' && settings_.search_calculator;
-    const bool files_only=query_.starts_with(L"? ") && settings_.search_everything;
+    const auto everything=route_everything(query_,settings_);
+    const bool files_only=everything.exclusive;
+    const auto calc=settings_.search_calculator && !files_only?calculate(query_):CalcResult{};const auto first=query_.find_first_not_of(L" \t\r\n");
+    const bool forced=first!=std::wstring::npos && query_[first]==L'=' && settings_.search_calculator && !files_only;
     std::vector<AppEntry> candidates;
     candidates.reserve(14);
     const auto collect=[&](const std::vector<AppEntry>& entries){for(const auto& hit:search(entries,query_,7))candidates.push_back(entries[hit.index]);};
@@ -198,7 +204,7 @@ void PaletteWindow::update_results(bool preserve) {
     if(rows_.empty()){
         const bool waiting=sources_pending_ || (loading_ && settings_.search_apps && !files_only);
         const bool missing=files_only && !everything_available_ && !waiting;
-        const bool empty_files=files_only && QString::fromStdWString(query_.substr(2)).trimmed().isEmpty();
+        const bool empty_files=files_only && !everything.enabled;
         rows_.push_back({empty_files?L"Type a filename":missing?L"Open Everything to search files":waiting?L"Searching...":L"No results",{}, {},false,L"empty"});
     }
     list_->setUpdatesEnabled(false);list_->clear();int selected=0;
@@ -269,7 +275,7 @@ void PaletteWindow::schedule_sources() {
     const auto trimmed=QString::fromStdWString(query_).trimmed();
     const bool forced=trimmed.startsWith('=') && settings_.search_calculator;
     sources_pending_=!trimmed.isEmpty() && !forced &&
-        ((settings_.search_paths && !expand_path_query(query_).empty()) || settings_.search_everything);
+        ((settings_.search_paths && !expand_path_query(query_).empty()) || route_everything(query_,settings_).enabled);
     if(sources_pending_)source_timer_->start();
 }
 void PaletteWindow::request_sources() {
@@ -277,10 +283,11 @@ void PaletteWindow::request_sources() {
     source_worker_.enqueue([this,generation,query,settings](std::stop_token stop){
         const auto cancelled=[&]{return stop.stop_requested() || generation!=source_generation_.load();};
         if(cancelled())return;SourceReply reply{generation,{}};
-        if(settings.search_paths)reply.entries=path_results(query);
+        const auto everything=route_everything(query,settings);
+        if(settings.search_paths && !everything.exclusive)reply.entries=path_results(query);
         if(cancelled())return;
-        if(settings.search_everything){const auto text=query.starts_with(L"? ")?query.substr(2):query;
-            auto files=query_everything(everything_window(),text,cancelled);reply.everything_available=files.available;
+        if(everything.enabled){
+            auto files=query_everything(everything_window(),everything.text,cancelled);reply.everything_available=files.available;
             for(auto& entry:files.entries)reply.entries.push_back(std::move(entry));}
         if(cancelled())return;
         {std::lock_guard lock(inbox_mutex_);pending_sources_=std::move(reply);}PostMessageW(host_,msg_sources,0,0);
@@ -290,11 +297,11 @@ void PaletteWindow::edit_settings() {
     settings_open_=true;unregister_bindings();
     if(!keyboard_->suspend()){hotkey_registered_=register_bindings(settings_);settings_open_=false;set_notice("Could not pause keyboard shortcuts. Try Settings again.");return;}
     Settings draft=settings_;
-    if(show_settings_dialog(handle(),draft)) {
+    if(show_settings_dialog(handle(),draft,[this](std::function<void()> completed){updater_->check(true,std::move(completed));})) {
         std::wstring error;const bool registered=register_bindings(draft);if(!registered)error=L"That shortcut is already in use. Choose another.";
         bool hook=false;if(registered){hook=keyboard_->start(draft.left_win,draft.right_win,all_hotkeys(draft));if(!hook)error=L"Could not install the Windows-key hook.";}
         const bool login=registered && hook && (draft.start_at_login==settings_.start_at_login || set_start_at_login(draft.start_at_login,error));
-        if(login && save_settings(draft,error)){settings_=std::move(draft);hotkey_registered_=true;set_notice({});schedule_sources();update_results();request_catalog();}
+        if(login && save_settings(draft,error)){settings_=std::move(draft);updater_->set_automatic(settings_.automatic_updates);hotkey_registered_=true;set_notice({});schedule_sources();update_results();request_catalog();}
         else {unregister_bindings();hotkey_registered_=register_bindings(settings_);keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));
             if(login && draft.start_at_login!=settings_.start_at_login){std::wstring ignored;set_start_at_login(settings_.start_at_login,ignored);}
             QMessageBox::warning(this,"Settings could not be saved",qs(error));}

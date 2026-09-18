@@ -7,6 +7,15 @@
 #include <optional>
 
 namespace palette {
+EverythingQuery route_everything(std::wstring_view query,const Settings& settings) {
+    if(!settings.search_everything)return {};
+    const auto& prefix=settings.everything_prefix;
+    const bool exclusive=valid_everything_prefix(prefix) && query.starts_with(prefix) &&
+        (query.size()==prefix.size() || iswspace(query[prefix.size()]));
+    if(exclusive)query.remove_prefix(std::min(query.size(),prefix.size()+1));
+    const bool nonempty=std::any_of(query.begin(),query.end(),[](wchar_t c){return !iswspace(c);});
+    return {nonempty && (exclusive || !settings.everything_prefix_only),exclusive,std::wstring(query)};
+}
 const std::vector<AppEntry>& windows_settings() {
     // URI reference: learn.microsoft.com/windows/apps/develop/launch/launch-settings
     static const auto entries=[] {

@@ -16,6 +16,7 @@ class QToolButton;
 class QSystemTrayIcon;
 class QTimer;
 namespace palette {
+class Updater;
 inline constexpr wchar_t window_class[]=L"FastPalette.Window";
 inline constexpr wchar_t invoke_message[]=L"FastPalette.Invoke.1";
 inline constexpr UINT msg_invoke=WM_APP+1,msg_catalog=WM_APP+2,msg_icons=WM_APP+3,
@@ -65,6 +66,7 @@ private:
     Settings settings_;
     size_t registered_bindings_=0;
     std::unique_ptr<KeyboardHook> keyboard_;
+    std::unique_ptr<Updater> updater_;
     Worker worker_;
     Worker source_worker_;
     std::atomic<std::uint64_t> source_generation_{0};

@@ -11,12 +11,14 @@ Download `FastPalette.exe` from [Releases](https://github.com/astraldeath/fast-p
 - Open **Settings** to change shortcuts, add portable apps, or enable launch at sign-in.
 - Under **Settings → Search**, toggle applications, calculator, Windows Settings, paths, and Everything independently.
 - Search settings by name (`Bluetooth`, `Windows Update`), or open a path such as `%appdata%`, `%temp%`, or `C:\Users`.
-- Enable **Everything** to search its index while Everything is running. Prefix with `? ` for file results only; Everything search syntax is supported.
+- Enable **Everything** to search its index while Everything is running. Its prefix (default `? `) shows only Everything results. Enable **Only with prefix** to exclude it from ordinary searches. Everything syntax passes through unchanged, including `ext:pdf`, `size:>1mb`, wildcards, Boolean operators, and `regex:`.
 - Configured Windows shortcuts replace their normal action while the app runs. Other shortcuts pass through. Windows security shortcuts remain reserved.
 
 Examples: `2+3*4`, `sqrt(81)`, `2^10`, `sin(pi/2)`. Supports `+ - * / ^ %`, parentheses, `pi`, `e`, `sqrt`, `abs`, `sin`, `cos`, `tan`, `ln`, and `log10`. Angles use radians; `10%` means `0.1`. Prefix with `=` for calculation only.
 
 Settings are stored in `HKCU\Software\FastPalette`. Disable launch at sign-in before moving the executable. Use the tray menu to exit.
+
+Updates install automatically when the palette and Settings are closed. Turn this off or check manually under **Settings → Updates**. Updating verifies the release checksum, replaces the portable executable in place, and restarts it; its folder must be writable. Versions before 1.2.0 need one manual download to get the updater.
 
 ## Build
 

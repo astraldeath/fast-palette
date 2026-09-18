@@ -27,6 +27,7 @@
 #include <QToolButton>
 #include <QWindow>
 #include <QTabWidget>
+#include <QPointer>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -113,7 +114,7 @@ UINT qt_key_to_vk(const QKeyEvent& event) {
 
 class SettingsDialog final : public QDialog {
 public:
-    SettingsDialog(QWidget* parent, const Settings& settings)
+    SettingsDialog(QWidget* parent, const Settings& settings,const UpdateCheck& check_updates)
         : QDialog(parent), draft_(settings) {
         setWindowTitle(QStringLiteral("Fast Palette settings"));
         setWindowFlag(Qt::FramelessWindowHint);
@@ -272,10 +273,34 @@ public:
         search_calculator_=add_source("searchCalculator","Calculator",draft_.search_calculator,"Use = for calculations only");
         search_settings_=add_source("searchSettings","Windows Settings",draft_.search_settings,"Display, sound, Bluetooth, Windows Update, and more");
         search_paths_=add_source("searchPaths","Files and folder paths",draft_.search_paths,"Open paths such as %appdata%, %temp%, or C:\\Users");
-        search_everything_=add_source("searchEverything","Everything",draft_.search_everything,"Requires Everything running. Use ? followed by a space for file search only.");
-        auto* everything_hint=new QLabel("Requires Everything running. Use ? for files only.",search_page);
+        search_everything_=add_source("searchEverything","Everything",draft_.search_everything,"Requires Everything running. Supports Everything search syntax.");
+        everything_prefix_only_=add_source("everythingPrefixOnly","Only with prefix",draft_.everything_prefix_only,"Exclude Everything from ordinary searches");
+        auto* prefix_row=new QHBoxLayout;
+        auto* prefix_label=new QLabel("Prefix",search_page);prefix_row->addWidget(prefix_label);
+        everything_prefix_=new QLineEdit(QString::fromStdWString(draft_.everything_prefix),search_page);
+        everything_prefix_->setObjectName("everythingPrefix");everything_prefix_->setMaxLength(16);everything_prefix_->setMaximumWidth(120);
+        everything_prefix_->setAccessibleName("Everything prefix");prefix_label->setBuddy(everything_prefix_);
+        everything_prefix_->setToolTip("1–16 characters, without spaces. Follow the prefix with a space when searching.");
+        prefix_row->addWidget(everything_prefix_);prefix_row->addStretch();search_layout->addLayout(prefix_row);
+        const auto enable_everything=[this](bool enabled){everything_prefix_only_->setEnabled(enabled);everything_prefix_->setEnabled(enabled);};
+        connect(search_everything_,&QCheckBox::toggled,this,enable_everything);enable_everything(draft_.search_everything);
+        auto* everything_hint=new QLabel("Requires Everything running. Follow the prefix with a space.",search_page);
         everything_hint->setProperty("muted",true);everything_hint->setWordWrap(true);search_layout->addWidget(everything_hint);
-        search_layout->addStretch();tabs->addTab(search_page,"Search");root->addWidget(tabs,1);
+        search_layout->addStretch();tabs->addTab(search_page,"Search");
+        auto* updates_page=new QWidget(tabs);auto* updates_layout=new QVBoxLayout(updates_page);
+        updates_layout->setContentsMargins(24,16,24,16);updates_layout->setSpacing(16);
+        auto* version_label=new QLabel("Fast Palette " FAST_PALETTE_VERSION,updates_page);updates_layout->addWidget(version_label);
+        automatic_updates_=new QCheckBox("Automatically install updates",updates_page);
+        automatic_updates_->setObjectName("automaticUpdates");automatic_updates_->setChecked(draft_.automatic_updates);
+        automatic_updates_->setToolTip("Checks every six hours and restarts when the palette and Settings are closed.");
+        updates_layout->addWidget(automatic_updates_);
+        auto* update_button=new QPushButton("Check for updates",updates_page);update_button->setObjectName("checkUpdates");
+        update_button->setEnabled(static_cast<bool>(check_updates));updates_layout->addWidget(update_button,0,Qt::AlignLeft);
+        connect(update_button,&QPushButton::clicked,this,[check_updates,button=QPointer<QPushButton>(update_button)]{
+            if(!check_updates)return;button->setEnabled(false);button->setText("Checking...");
+            check_updates([button]{if(button){button->setEnabled(true);button->setText("Check for updates");}});
+        });
+        updates_layout->addStretch();tabs->addTab(updates_page,"Updates");root->addWidget(tabs,1);
 
         auto* footer = new QWidget(this);
         auto* footer_layout = new QVBoxLayout(footer);
@@ -287,6 +312,7 @@ public:
         save_button_->setObjectName(QStringLiteral("saveButton"));
         cancel_button_->setObjectName(QStringLiteral("cancelButton"));
         save_button_->setDefault(true);
+        connect(everything_prefix_,&QLineEdit::textChanged,this,[this](const QString& text){save_button_->setEnabled(valid_everything_prefix(text.toStdWString()));});
         footer_layout->addWidget(buttons);
         root->addWidget(footer);
         setSizeGripEnabled(true);
@@ -485,11 +511,14 @@ private:
             draft_.left_win = left_win_->isChecked();
             draft_.right_win = right_win_->isChecked();
             draft_.start_at_login = start_at_login_->isChecked();
+            draft_.automatic_updates=automatic_updates_->isChecked();
             draft_.search_apps=search_apps_->isChecked();
             draft_.search_calculator=search_calculator_->isChecked();
             draft_.search_settings=search_settings_->isChecked();
             draft_.search_paths=search_paths_->isChecked();
             draft_.search_everything=search_everything_->isChecked();
+            draft_.everything_prefix_only=everything_prefix_only_->isChecked();
+            draft_.everything_prefix=everything_prefix_->text().toStdWString();
         }
         QDialog::done(result);
     }
@@ -594,6 +623,9 @@ private:
     QCheckBox* start_at_login_ = nullptr;
     QCheckBox *search_apps_=nullptr,*search_calculator_=nullptr,*search_settings_=nullptr,*search_paths_=nullptr,*search_everything_=nullptr;
     QToolButton* maximize_=nullptr;
+    QCheckBox* automatic_updates_=nullptr;
+    QCheckBox* everything_prefix_only_=nullptr;
+    QLineEdit* everything_prefix_=nullptr;
     QListWidget* portable_apps_ = nullptr;
     QPushButton* remove_app_ = nullptr;
     QPushButton* save_button_ = nullptr;
@@ -618,9 +650,9 @@ LRESULT CALLBACK shortcut_hook_proc(int code, WPARAM message, LPARAM data) {
 
 } // namespace
 
-bool show_settings_dialog(HWND owner, Settings& settings) {
+bool show_settings_dialog(HWND owner, Settings& settings,const UpdateCheck& check_updates) {
     QWidget* parent = owner ? QWidget::find(reinterpret_cast<WId>(owner)) : nullptr;
-    SettingsDialog dialog(parent, settings);
+    SettingsDialog dialog(parent, settings,check_updates);
     if (dialog.exec() != QDialog::Accepted) return false;
     settings = dialog.take_settings();
     return true;
