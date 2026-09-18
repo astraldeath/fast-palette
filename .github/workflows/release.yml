@@ -38,6 +38,7 @@ jobs:
           "RELEASE_VERSION=$($env:RELEASE_TAG.Substring(1))" >> $env:GITHUB_ENV
 
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: qt-cache
         with:
           path: build/deps
           key: qt-${{ runner.os }}-${{ runner.arch }}-vs2022-${{ hashFiles('tools/build-qt.ps1') }}
@@ -77,3 +78,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
           gh release edit $env:RELEASE_TAG --draft=false
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+
+      - name: Preserve Qt cache
+        if: always() && steps.qt-cache.outputs.cache-hit != 'true' && hashFiles('build/deps/qt-static/lib/cmake/Qt6/Qt6Config.cmake') != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/deps
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}

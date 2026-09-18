@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-set(FAST_PALETTE_VERSION "1.3.0" CACHE STRING "Release version")
+set(FAST_PALETTE_VERSION "1.2.0" CACHE STRING "Release version")
 project(FastPalette VERSION ${FAST_PALETTE_VERSION} LANGUAGES CXX RC)
 configure_file(resources/app.rc "${CMAKE_BINARY_DIR}/generated/app.rc" @ONLY)
 configure_file(resources/app.manifest "${CMAKE_BINARY_DIR}/generated/app.manifest" @ONLY)
