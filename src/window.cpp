@@ -3,6 +3,7 @@
 #include "providers.hpp"
 #include "modules.hpp"
 #include "conversions.hpp"
+#include "number_format.hpp"
 #include "updater.hpp"
 #include "ui_theme.hpp"
 #include "win_util.hpp"
@@ -212,7 +213,7 @@ void PaletteWindow::update_results(bool preserve) {
     if(route.allows(Module::settings) && first!=std::wstring::npos)collect(windows_settings());
     if(route.allows(Module::aliases))collect(aliases_);
     const auto hits=search(candidates,route.text,7);
-    if(calc.status==CalcStatus::value)rows_.push_back({calc.text,L"Enter to copy",{},true,L"calculation"});
+    if(calc.status==CalcStatus::value)rows_.push_back({localized_number_result(qs(calc.text)).toStdWString(),L"Enter to copy",{},true,L"calculation",plain_number_result(qs(calc.text)).toStdWString()});
     else if(calc.status==CalcStatus::error && hits.empty())rows_.push_back({calc.text,L"Check the expression",{},false,L"error"});
     else if(calc.status==CalcStatus::incomplete && hits.empty())rows_.push_back({L"Keep typing",L"Incomplete expression",{},false,L"incomplete"});
     if(!forced){
@@ -275,7 +276,7 @@ bool PaletteWindow::clipboard(const std::wstring& value) {
 void PaletteWindow::activate(ResultAction action) {
     const int selected=list_->currentRow();if(selected<0 || static_cast<size_t>(selected)>=rows_.size() || launching_)return;
     const auto row=rows_[selected];
-    if(row.copy && action==ResultAction::open){if(clipboard(row.title))dismiss(true);else set_notice("Clipboard is busy. Press Enter to try again.");}
+    if(row.copy && action==ResultAction::open){if(clipboard(row.copy_text))dismiss(true);else set_notice("Clipboard is busy. Press Enter to try again.");}
     else if(row.app){if(!supports_action(*row.app,action)){set_notice("This action is unavailable for this result.");return;}launching_=true;set_notice("Opening "+qs(row.title)+"...");const auto app=*row.app;
         worker_.enqueue([this,app,action](std::stop_token stop){if(stop.stop_requested())return;LaunchReply reply{};reply.id=app.id;reply.ok=launch_app(app,reply.error,action);
             {std::lock_guard lock(inbox_mutex_);pending_launch_=std::move(reply);}PostMessageW(host_,msg_launch,0,0);},true);
@@ -373,7 +374,7 @@ LRESULT PaletteWindow::message(UINT message,WPARAM w,LPARAM l) {
         if(reply && reply->generation==source_generation_.load()){source_results_=std::move(reply->entries);everything_available_=reply->everything_available;sources_pending_=false;update_results(true);}return 0;}
     case msg_invoke:case WM_HOTKEY:if(isVisible()&&!settings_open_)dismiss(true);else show();return 0;
     case msg_exit:qApp->quit();return 0;
-    case WM_SETTINGCHANGE:apply_ui_theme();update_icons();return 0;
+    case WM_SETTINGCHANGE:apply_ui_theme();update_results(true);return 0;
     case WM_WTSSESSION_CHANGE:
         if(keyboard_ && w==WTS_SESSION_LOCK){dismiss();keyboard_->stop();}
         else if(keyboard_ && !settings_open_ && (w==WTS_SESSION_UNLOCK || w==WTS_CONSOLE_CONNECT || w==WTS_REMOTE_CONNECT)){keyboard_->stop();keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));}return 0;

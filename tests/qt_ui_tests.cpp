@@ -1,6 +1,7 @@
 #include "window.hpp"
 #include "ui_theme.hpp"
 #include "providers.hpp"
+#include "number_format.hpp"
 #include <QApplication>
 #include <QLineEdit>
 #include <QListWidget>
@@ -11,6 +12,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QLabel>
+#include <QLocale>
 #include <algorithm>
 #include <vector>
 #include <iostream>
@@ -32,7 +34,7 @@ int main(int argc,char** argv) {
     check(results->count()>0 && results->item(0)->data(Qt::UserRole).toString()=="14","calculator result in framework list");
     check(results->item(0)->toolTip()=="14\nEnter to copy","full result tooltip belongs to hit-tested list item");
     input->setText("180cm to ftin");
-    check(results->item(0)->data(Qt::UserRole).toString()=="5 ft 10.87 in","conversion appears in palette");
+    check(results->item(0)->data(Qt::UserRole).toString()==palette::localized_number_result("5 ft 10.87 in"),"conversion appears in palette");
     input->setText("conv 2MBps to Mbps");
     check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="16 Mbps","conversion prefix isolates rate conversion");
     input->setText("@ worktest");
@@ -40,7 +42,11 @@ int main(int argc,char** argv) {
     input->setText("win bluetooth");
     check(results->item(0)->toolTip().contains("Windows Settings"),"Windows Settings prefix routes stripped query");
     input->setText("=2pi");
-    check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString().startsWith("6.283"),"implicit multiplication reaches palette");
+    check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString().startsWith("6"+QLocale::system().decimalPoint()+"283"),"implicit multiplication reaches palette");
+    input->setText("1e6");
+    check(results->item(0)->data(Qt::UserRole).toString()==QLocale::system().toString(1000000),"scientific input displays expanded localized integer");
+    input->setText("1e-6");
+    check(results->item(0)->data(Qt::UserRole).toString()=="0"+QLocale::system().decimalPoint()+"000001","negative exponent displays plain decimal");
     input->setText("hello world");input->setCursorPosition(11);
     QTest::keyClick(input,Qt::Key_Backspace,Qt::ControlModifier);
     check(input->text()=="hello ","framework Ctrl+Backspace deletes word");
