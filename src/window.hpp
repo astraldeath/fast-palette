@@ -1,5 +1,6 @@
 #pragma once
 #include "core.hpp"
+#include "catalog.hpp"
 #include "keyboard.hpp"
 #include "settings.hpp"
 #include "worker.hpp"
@@ -37,7 +38,9 @@ private:
     LRESULT message(UINT,WPARAM,LPARAM);
     void update_results(bool preserve=false);
     void update_icons();
-    void activate();
+    void activate(ResultAction action=ResultAction::open);
+    void copy_result_path();
+    void show_actions(const QPoint& point);
     void dismiss(bool restore=false);
     void request_catalog();
     void request_icons();
@@ -63,6 +66,7 @@ private:
     UINT registered_invoke_=0;
     ULONG shell_notify_=0;
     bool loading_=false,refresh_again_=false,launching_=false,settings_open_=false,hotkey_registered_=false;
+    bool actions_open_=false;
     Settings settings_;
     size_t registered_bindings_=0;
     std::unique_ptr<KeyboardHook> keyboard_;
@@ -73,6 +77,7 @@ private:
     std::vector<AppEntry> source_results_;
     bool sources_pending_=false,everything_available_=true;
     std::vector<AppEntry> apps_;
+    std::vector<AppEntry> aliases_;
     std::vector<Row> rows_;
     std::wstring query_;
     QHash<QString,QIcon> icons_;

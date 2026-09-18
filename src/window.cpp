@@ -1,6 +1,8 @@
 #include "window.hpp"
 #include "catalog.hpp"
 #include "providers.hpp"
+#include "modules.hpp"
+#include "conversions.hpp"
 #include "updater.hpp"
 #include "ui_theme.hpp"
 #include "win_util.hpp"
@@ -39,6 +41,7 @@ constexpr int row_height=58;
 QString qs(const std::wstring& value){return QString::fromStdWString(value);}
 }
 PaletteWindow::PaletteWindow(Settings settings):QWidget(nullptr,Qt::Tool|Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint),settings_(std::move(settings)) {
+    aliases_=alias_entries(settings_);
     setObjectName("paletteRoot");setWindowTitle("Fast Palette");
     // Qt commits this translucent backing store as a complete frame. There is
     // no unpainted white Win32 client surface between show and first WM_PAINT.
@@ -69,6 +72,10 @@ PaletteWindow::PaletteWindow(Settings settings):QWidget(nullptr,Qt::Tool|Qt::Fra
     connect(edit_,&QLineEdit::textChanged,this,[this](const QString& value){query_=value.toStdWString();set_notice({});schedule_sources();update_results();});
     connect(edit_,&QLineEdit::returnPressed,this,[this]{activate();});
     connect(list_,&QListWidget::itemActivated,this,[this](QListWidgetItem*){activate();});
+    list_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(list_,&QListWidget::customContextMenuRequested,this,[this](const QPoint& point){
+        if(auto* item=list_->itemAt(point))list_->setCurrentItem(item);show_actions(point);
+    });
     connect(settings_button_,&QToolButton::clicked,this,[this]{edit_settings();});
     refresh_timer_=new QTimer(this);refresh_timer_->setSingleShot(true);refresh_timer_->setInterval(500);
     connect(refresh_timer_,&QTimer::timeout,this,[this]{request_catalog();});
@@ -156,12 +163,22 @@ void PaletteWindow::dismiss(bool restore) {
 }
 void PaletteWindow::closeEvent(QCloseEvent* event){event->ignore();dismiss(true);}
 bool PaletteWindow::event(QEvent* event) {
-    if(event->type()==QEvent::WindowDeactivate && !settings_open_ && isVisible())dismiss();
+    if(event->type()==QEvent::WindowDeactivate && !settings_open_ && !actions_open_ && isVisible())dismiss();
     return QWidget::event(event);
 }
 bool PaletteWindow::eventFilter(QObject* object,QEvent* event) {
     if(event->type()==QEvent::KeyPress) {
         auto* key=static_cast<QKeyEvent*>(event);
+        if(object!=settings_button_){
+            const auto modifiers=key->modifiers();
+            if((key->key()==Qt::Key_Return || key->key()==Qt::Key_Enter) && modifiers.testFlag(Qt::ControlModifier)){
+                activate(modifiers.testFlag(Qt::ShiftModifier)?ResultAction::run_as_admin:ResultAction::open_folder);return true;
+            }
+            if(key->key()==Qt::Key_C && modifiers==(Qt::ControlModifier|Qt::ShiftModifier)){copy_result_path();return true;}
+            if(key->key()==Qt::Key_Menu || (key->key()==Qt::Key_F10 && modifiers==Qt::ShiftModifier)){
+                show_actions(list_->visualItemRect(list_->currentItem()).center());return true;
+            }
+        }
         if(key->key()==Qt::Key_Escape){dismiss(true);return true;}
         if(object==settings_button_ && (key->key()==Qt::Key_Return || key->key()==Qt::Key_Enter)) {
             settings_button_->click();return true;
@@ -180,16 +197,21 @@ void PaletteWindow::update_results(bool preserve) {
     std::wstring old;
     const int current=list_->currentRow();if(preserve && current>=0 && static_cast<size_t>(current)<rows_.size())old=rows_[current].identity;
     rows_.clear();
-    const auto everything=route_everything(query_,settings_);
-    const bool files_only=everything.exclusive;
-    const auto calc=settings_.search_calculator && !files_only?calculate(query_):CalcResult{};const auto first=query_.find_first_not_of(L" \t\r\n");
-    const bool forced=first!=std::wstring::npos && query_[first]==L'=' && settings_.search_calculator && !files_only;
+    const auto route=route_query(query_,settings_);
+    const bool files_only=route.exclusive==Module::everything;
+    const auto conversion=route.allows(Module::conversions)?convert_units(route.text):CalcResult{};
+    const auto math=route.allows(Module::calculator) && conversion.status==CalcStatus::none?
+        calculate(route.exclusive==Module::calculator?L"="+route.text:route.text,settings_.calculator_degrees):CalcResult{};
+    const auto calc=conversion.status!=CalcStatus::none?conversion:math;
+    const bool forced=route.exclusive==Module::calculator || route.exclusive==Module::conversions;
+    const auto first=route.text.find_first_not_of(L" \t\r\n");
     std::vector<AppEntry> candidates;
-    candidates.reserve(14);
-    const auto collect=[&](const std::vector<AppEntry>& entries){for(const auto& hit:search(entries,query_,7))candidates.push_back(entries[hit.index]);};
-    if(!forced && !files_only && settings_.search_apps)collect(apps_);
-    if(!forced && !files_only && settings_.search_settings && first!=std::wstring::npos)collect(windows_settings());
-    const auto hits=forced?std::vector<SearchHit>{}:search(candidates,query_,7);
+    candidates.reserve(21);
+    const auto collect=[&](const std::vector<AppEntry>& entries){for(const auto& hit:search(entries,route.text,7))candidates.push_back(entries[hit.index]);};
+    if(route.allows(Module::apps))collect(apps_);
+    if(route.allows(Module::settings) && first!=std::wstring::npos)collect(windows_settings());
+    if(route.allows(Module::aliases))collect(aliases_);
+    const auto hits=search(candidates,route.text,7);
     if(calc.status==CalcStatus::value)rows_.push_back({calc.text,L"Enter to copy",{},true,L"calculation"});
     else if(calc.status==CalcStatus::error && hits.empty())rows_.push_back({calc.text,L"Check the expression",{},false,L"error"});
     else if(calc.status==CalcStatus::incomplete && hits.empty())rows_.push_back({L"Keep typing",L"Incomplete expression",{},false,L"incomplete"});
@@ -202,9 +224,9 @@ void PaletteWindow::update_results(bool preserve) {
             if(std::none_of(rows_.begin(),rows_.end(),[&](const auto& row){return row.identity==entry.id;}))rows_.push_back({entry.name,entry.detail,entry,false,entry.id});}
     }
     if(rows_.empty()){
-        const bool waiting=sources_pending_ || (loading_ && settings_.search_apps && !files_only);
+        const bool waiting=sources_pending_ || (loading_ && route.allows(Module::apps));
         const bool missing=files_only && !everything_available_ && !waiting;
-        const bool empty_files=files_only && !everything.enabled;
+        const bool empty_files=files_only && first==std::wstring::npos;
         rows_.push_back({empty_files?L"Type a filename":missing?L"Open Everything to search files":waiting?L"Searching...":L"No results",{}, {},false,L"empty"});
     }
     list_->setUpdatesEnabled(false);list_->clear();int selected=0;
@@ -250,14 +272,36 @@ bool PaletteWindow::clipboard(const std::wstring& value) {
     if(!OpenClipboard(handle())){GlobalFree(memory);return false;}const bool ok=EmptyClipboard()!=FALSE && SetClipboardData(CF_UNICODETEXT,memory)!=nullptr;
     CloseClipboard();if(!ok)GlobalFree(memory);return ok;
 }
-void PaletteWindow::activate() {
+void PaletteWindow::activate(ResultAction action) {
     const int selected=list_->currentRow();if(selected<0 || static_cast<size_t>(selected)>=rows_.size() || launching_)return;
     const auto row=rows_[selected];
-    if(row.copy){if(clipboard(row.title))dismiss(true);else set_notice("Clipboard is busy. Press Enter to try again.");}
-    else if(row.app){launching_=true;set_notice("Opening "+qs(row.title)+"...");const auto app=*row.app;
-        worker_.enqueue([this,app](std::stop_token stop){if(stop.stop_requested())return;LaunchReply reply{};reply.id=app.id;reply.ok=launch_app(app,reply.error);
+    if(row.copy && action==ResultAction::open){if(clipboard(row.title))dismiss(true);else set_notice("Clipboard is busy. Press Enter to try again.");}
+    else if(row.app){if(!supports_action(*row.app,action)){set_notice("This action is unavailable for this result.");return;}launching_=true;set_notice("Opening "+qs(row.title)+"...");const auto app=*row.app;
+        worker_.enqueue([this,app,action](std::stop_token stop){if(stop.stop_requested())return;LaunchReply reply{};reply.id=app.id;reply.ok=launch_app(app,reply.error,action);
             {std::lock_guard lock(inbox_mutex_);pending_launch_=std::move(reply);}PostMessageW(host_,msg_launch,0,0);},true);
     }
+}
+void PaletteWindow::copy_result_path() {
+    const int selected=list_->currentRow();if(selected<0 || static_cast<size_t>(selected)>=rows_.size() || !rows_[selected].app)return;
+    const auto path=resolved_app_path(*rows_[selected].app);
+    if(path.empty()){set_notice("This result has no file path.");return;}
+    if(clipboard(path))dismiss(true);else set_notice("Clipboard is busy. Try again.");
+}
+void PaletteWindow::show_actions(const QPoint& point) {
+    const int selected=list_->currentRow();if(selected<0 || static_cast<size_t>(selected)>=rows_.size())return;
+    const auto row=rows_[selected];if(!row.app && !row.copy)return;
+    const auto select_result=[this,identity=row.identity]{for(size_t i=0;i<rows_.size();++i)if(rows_[i].identity==identity){list_->setCurrentRow(static_cast<int>(i));return true;}return false;};
+    QMenu menu(this);auto* open=menu.addAction(row.copy?"Copy result\tEnter":"Open\tEnter");
+    connect(open,&QAction::triggered,this,[this,select_result]{if(select_result())activate();});
+    if(row.app){
+        auto* admin=menu.addAction("Run as administrator\tCtrl+Shift+Enter");admin->setEnabled(supports_action(*row.app,ResultAction::run_as_admin));
+        connect(admin,&QAction::triggered,this,[this,select_result]{if(select_result())activate(ResultAction::run_as_admin);});
+        auto* folder=menu.addAction("Open containing folder\tCtrl+Enter");folder->setEnabled(supports_action(*row.app,ResultAction::open_folder));
+        connect(folder,&QAction::triggered,this,[this,select_result]{if(select_result())activate(ResultAction::open_folder);});
+        auto* copy=menu.addAction("Copy path\tCtrl+Shift+C");copy->setEnabled(!resolved_app_path(*row.app).empty());
+        connect(copy,&QAction::triggered,this,[this,select_result]{if(select_result())copy_result_path();});
+    }
+    actions_open_=true;menu.exec(list_->viewport()->mapToGlobal(point));actions_open_=false;
 }
 void PaletteWindow::request_catalog() {
     if(!settings_.search_apps){apps_.clear();update_results(true);return;}
@@ -266,16 +310,16 @@ void PaletteWindow::request_catalog() {
         {std::lock_guard lock(inbox_mutex_);pending_apps_=std::move(apps);}PostMessageW(host_,msg_catalog,0,0);});
 }
 void PaletteWindow::request_icons() {
-    for(const auto& row:rows_)if(row.app){const auto app=*row.app;if(app.source!=SearchSource::application || !requested_icons_.insert(app.id).second)continue;
+    for(const auto& row:rows_)if(row.app){const auto app=*row.app;if((app.source!=SearchSource::application && app.source!=SearchSource::alias) || !requested_icons_.insert(app.id).second)continue;
         worker_.enqueue([this,app](std::stop_token stop){if(stop.stop_requested())return;ComApartment apartment;const auto icon=load_app_icon(app);
             {std::lock_guard lock(inbox_mutex_);pending_icons_.emplace_back(app.id,icon);}PostMessageW(host_,msg_icons,0,0);});}
 }
 void PaletteWindow::schedule_sources() {
     ++source_generation_;source_timer_->stop();source_results_.clear();everything_available_=true;
-    const auto trimmed=QString::fromStdWString(query_).trimmed();
-    const bool forced=trimmed.startsWith('=') && settings_.search_calculator;
-    sources_pending_=!trimmed.isEmpty() && !forced &&
-        ((settings_.search_paths && !expand_path_query(query_).empty()) || route_everything(query_,settings_).enabled);
+    const auto route=route_query(query_,settings_);
+    const auto trimmed=QString::fromStdWString(route.text).trimmed();
+    sources_pending_=!trimmed.isEmpty() &&
+        ((route.allows(Module::paths) && !expand_path_query(route.text).empty()) || route.allows(Module::everything));
     if(sources_pending_)source_timer_->start();
 }
 void PaletteWindow::request_sources() {
@@ -283,8 +327,9 @@ void PaletteWindow::request_sources() {
     source_worker_.enqueue([this,generation,query,settings](std::stop_token stop){
         const auto cancelled=[&]{return stop.stop_requested() || generation!=source_generation_.load();};
         if(cancelled())return;SourceReply reply{generation,{}};
+        const auto route=route_query(query,settings);
         const auto everything=route_everything(query,settings);
-        if(settings.search_paths && !everything.exclusive)reply.entries=path_results(query);
+        if(route.allows(Module::paths))reply.entries=path_results(route.text);
         if(cancelled())return;
         if(everything.enabled){
             auto files=query_everything(everything_window(),everything.text,cancelled);reply.everything_available=files.available;
@@ -301,7 +346,7 @@ void PaletteWindow::edit_settings() {
         std::wstring error;const bool registered=register_bindings(draft);if(!registered)error=L"That shortcut is already in use. Choose another.";
         bool hook=false;if(registered){hook=keyboard_->start(draft.left_win,draft.right_win,all_hotkeys(draft));if(!hook)error=L"Could not install the Windows-key hook.";}
         const bool login=registered && hook && (draft.start_at_login==settings_.start_at_login || set_start_at_login(draft.start_at_login,error));
-        if(login && save_settings(draft,error)){settings_=std::move(draft);updater_->set_automatic(settings_.automatic_updates);hotkey_registered_=true;set_notice({});schedule_sources();update_results();request_catalog();}
+        if(login && save_settings(draft,error)){settings_=std::move(draft);aliases_=alias_entries(settings_);updater_->set_automatic(settings_.automatic_updates);hotkey_registered_=true;set_notice({});schedule_sources();update_results();request_catalog();}
         else {unregister_bindings();hotkey_registered_=register_bindings(settings_);keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));
             if(login && draft.start_at_login!=settings_.start_at_login){std::wstring ignored;set_start_at_login(settings_.start_at_login,ignored);}
             QMessageBox::warning(this,"Settings could not be saved",qs(error));}

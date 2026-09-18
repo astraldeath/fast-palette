@@ -1,5 +1,6 @@
 #include "providers.hpp"
 #include "core.hpp"
+#include "modules.hpp"
 #include <algorithm>
 #include <cstring>
 #include <cwctype>
@@ -8,13 +9,9 @@
 
 namespace palette {
 EverythingQuery route_everything(std::wstring_view query,const Settings& settings) {
-    if(!settings.search_everything)return {};
-    const auto& prefix=settings.everything_prefix;
-    const bool exclusive=valid_everything_prefix(prefix) && query.starts_with(prefix) &&
-        (query.size()==prefix.size() || iswspace(query[prefix.size()]));
-    if(exclusive)query.remove_prefix(std::min(query.size(),prefix.size()+1));
-    const bool nonempty=std::any_of(query.begin(),query.end(),[](wchar_t c){return !iswspace(c);});
-    return {nonempty && (exclusive || !settings.everything_prefix_only),exclusive,std::wstring(query)};
+    const auto route=route_query(query,settings);
+    const bool nonempty=std::any_of(route.text.begin(),route.text.end(),[](wchar_t c){return !iswspace(c);});
+    return {route.allows(Module::everything) && nonempty,route.exclusive==Module::everything,route.text};
 }
 const std::vector<AppEntry>& windows_settings() {
     // URI reference: learn.microsoft.com/windows/apps/develop/launch/launch-settings

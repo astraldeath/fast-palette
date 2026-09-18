@@ -265,28 +265,71 @@ public:
         auto* search_page = new QWidget(tabs);
         auto* search_layout = new QVBoxLayout(search_page);
         search_layout->setContentsMargins(24,16,24,16);search_layout->setSpacing(10);
-        const auto add_source=[&](const char* name,const char* label,bool enabled,const char* hint){
-            auto* checkbox=new QCheckBox(label,search_page);checkbox->setObjectName(name);
-            checkbox->setChecked(enabled);checkbox->setToolTip(hint);search_layout->addWidget(checkbox);return checkbox;
+        const char* names[]={"searchApps","searchCalculator","searchSettings","searchPaths","searchEverything","searchConversions","searchAliases"};
+        const char* labels[]={"Applications","Calculator","Windows Settings","Paths","Everything","Unit conversions","Aliases"};
+        for(size_t i=0;i<module_count;++i){
+            const auto module=static_cast<Module>(i);const auto rule=module_rule(draft_,module);
+            auto* row=new QHBoxLayout;
+            module_enabled_[i]=new QCheckBox(labels[i],search_page);module_enabled_[i]->setObjectName(names[i]);
+            module_enabled_[i]->setChecked(module_enabled(draft_,module));row->addWidget(module_enabled_[i],1);
+            module_prefix_[i]=new QLineEdit(QString::fromStdWString(rule.prefix),search_page);
+            module_prefix_[i]->setObjectName(QString::fromWCharArray(module_keys[i]).toLower()+"Prefix");
+            module_prefix_[i]->setPlaceholderText("Prefix");module_prefix_[i]->setMaxLength(16);module_prefix_[i]->setFixedWidth(90);
+            module_prefix_[i]->setAccessibleName(QString(labels[i])+" prefix");
+            module_prefix_[i]->setToolTip("Follow the prefix with a space to search only this module.");row->addWidget(module_prefix_[i]);
+            module_only_[i]=new QCheckBox("Prefix only",search_page);module_only_[i]->setChecked(rule.only);
+            module_only_[i]->setObjectName(QString::fromWCharArray(module_keys[i]).toLower()+"PrefixOnly");
+            module_only_[i]->setAccessibleName(QString(labels[i])+" only with prefix");row->addWidget(module_only_[i]);
+            auto enable=[this,i](bool value){module_prefix_[i]->setEnabled(value);module_only_[i]->setEnabled(value);};
+            connect(module_enabled_[i],&QCheckBox::toggled,this,enable);enable(module_enabled_[i]->isChecked());
+            search_layout->addLayout(row);
+        }
+        everything_prefix_=module_prefix_[static_cast<size_t>(Module::everything)];
+        everything_prefix_only_=module_only_[static_cast<size_t>(Module::everything)];
+        search_layout->addWidget(separator(search_page));
+        degrees_=new QCheckBox("Use degrees for trigonometry",search_page);degrees_->setObjectName("calculatorDegrees");
+        degrees_->setChecked(draft_.calculator_degrees);search_layout->addWidget(degrees_);
+        degrees_->setEnabled(draft_.search_calculator);
+        connect(module_enabled_[static_cast<size_t>(Module::calculator)],&QCheckBox::toggled,degrees_,&QWidget::setEnabled);
+        search_layout->addStretch();
+        auto* search_scroll=new QScrollArea(tabs);search_scroll->setObjectName("moduleScrollArea");
+        search_scroll->setWidgetResizable(true);search_scroll->setFrameShape(QFrame::NoFrame);search_scroll->setWidget(search_page);
+        tabs->addTab(search_scroll,"Search");
+
+        auto* aliases_page=new QWidget(tabs);auto* aliases_layout=new QVBoxLayout(aliases_page);
+        aliases_layout->setContentsMargins(24,16,24,16);aliases_layout->setSpacing(10);
+        aliases_list_=new QListWidget(aliases_page);aliases_list_->setObjectName("aliasesList");aliases_layout->addWidget(aliases_list_,1);
+        for(const auto& alias:draft_.aliases)aliases_list_->addItem(QString::fromStdWString(alias.name));
+        alias_name_=new QLineEdit(aliases_page);alias_name_->setObjectName("aliasName");alias_name_->setPlaceholderText("Name");alias_name_->setAccessibleName("Alias name");alias_name_->setMaxLength(64);
+        alias_target_=new QLineEdit(aliases_page);alias_target_->setObjectName("aliasTarget");alias_target_->setPlaceholderText("Application or folder path");alias_target_->setAccessibleName("Alias target");
+        alias_arguments_=new QLineEdit(aliases_page);alias_arguments_->setObjectName("aliasArguments");alias_arguments_->setPlaceholderText("Arguments (optional)");alias_arguments_->setAccessibleName("Alias arguments");
+        aliases_layout->addWidget(alias_name_);aliases_layout->addWidget(alias_target_);aliases_layout->addWidget(alias_arguments_);
+        auto* alias_buttons=new QHBoxLayout;auto* add_alias=new QPushButton("Add",aliases_page);add_alias->setObjectName("addAlias");
+        auto* update_alias=new QPushButton("Update",aliases_page);update_alias->setObjectName("updateAlias");
+        auto* remove_alias=new QPushButton("Remove",aliases_page);remove_alias->setObjectName("removeAlias");
+        alias_buttons->addStretch();alias_buttons->addWidget(add_alias);alias_buttons->addWidget(update_alias);alias_buttons->addWidget(remove_alias);aliases_layout->addLayout(alias_buttons);
+        auto* alias_error=new QLabel(aliases_page);alias_error->setProperty("role","error");alias_error->setWordWrap(true);alias_error->hide();aliases_layout->addWidget(alias_error);
+        connect(aliases_list_,&QListWidget::currentRowChanged,this,[this,update_alias,remove_alias](int selected){
+            const bool valid=selected>=0 && static_cast<size_t>(selected)<draft_.aliases.size();update_alias->setEnabled(valid);remove_alias->setEnabled(valid);
+            if(valid){const auto& alias=draft_.aliases[selected];alias_name_->setText(QString::fromStdWString(alias.name));alias_target_->setText(QString::fromStdWString(alias.target));alias_arguments_->setText(QString::fromStdWString(alias.arguments));}
+        });
+        update_alias->setEnabled(false);remove_alias->setEnabled(false);
+        const auto store_alias=[this,alias_error](bool update){
+            Settings candidate=draft_;Alias alias{alias_name_->text().trimmed().toStdWString(),alias_target_->text().trimmed().toStdWString(),alias_arguments_->text().toStdWString()};
+            const int selected=aliases_list_->currentRow();
+            if(update){if(selected<0)return;candidate.aliases[selected]=alias;}else candidate.aliases.push_back(alias);
+            std::wstring error;if(!valid_module_settings(candidate,error)){alias_error->setText(QString::fromStdWString(error));alias_error->show();return;}
+            draft_.aliases=std::move(candidate.aliases);alias_error->hide();aliases_list_->clear();
+            for(const auto& entry:draft_.aliases)aliases_list_->addItem(QString::fromStdWString(entry.name));
+            aliases_list_->setCurrentRow(update?selected:static_cast<int>(draft_.aliases.size()-1));
         };
-        search_apps_=add_source("searchApps","Applications",draft_.search_apps,"Installed and portable applications");
-        search_calculator_=add_source("searchCalculator","Calculator",draft_.search_calculator,"Use = for calculations only");
-        search_settings_=add_source("searchSettings","Windows Settings",draft_.search_settings,"Display, sound, Bluetooth, Windows Update, and more");
-        search_paths_=add_source("searchPaths","Files and folder paths",draft_.search_paths,"Open paths such as %appdata%, %temp%, or C:\\Users");
-        search_everything_=add_source("searchEverything","Everything",draft_.search_everything,"Requires Everything running. Supports Everything search syntax.");
-        everything_prefix_only_=add_source("everythingPrefixOnly","Only with prefix",draft_.everything_prefix_only,"Exclude Everything from ordinary searches");
-        auto* prefix_row=new QHBoxLayout;
-        auto* prefix_label=new QLabel("Prefix",search_page);prefix_row->addWidget(prefix_label);
-        everything_prefix_=new QLineEdit(QString::fromStdWString(draft_.everything_prefix),search_page);
-        everything_prefix_->setObjectName("everythingPrefix");everything_prefix_->setMaxLength(16);everything_prefix_->setMaximumWidth(120);
-        everything_prefix_->setAccessibleName("Everything prefix");prefix_label->setBuddy(everything_prefix_);
-        everything_prefix_->setToolTip("1–16 characters, without spaces. Follow the prefix with a space when searching.");
-        prefix_row->addWidget(everything_prefix_);prefix_row->addStretch();search_layout->addLayout(prefix_row);
-        const auto enable_everything=[this](bool enabled){everything_prefix_only_->setEnabled(enabled);everything_prefix_->setEnabled(enabled);};
-        connect(search_everything_,&QCheckBox::toggled,this,enable_everything);enable_everything(draft_.search_everything);
-        auto* everything_hint=new QLabel("Requires Everything running. Follow the prefix with a space.",search_page);
-        everything_hint->setProperty("muted",true);everything_hint->setWordWrap(true);search_layout->addWidget(everything_hint);
-        search_layout->addStretch();tabs->addTab(search_page,"Search");
+        connect(add_alias,&QPushButton::clicked,this,[store_alias]{store_alias(false);});
+        connect(update_alias,&QPushButton::clicked,this,[store_alias]{store_alias(true);});
+        connect(remove_alias,&QPushButton::clicked,this,[this,alias_error]{const int selected=aliases_list_->currentRow();if(selected<0)return;
+            draft_.aliases.erase(draft_.aliases.begin()+selected);delete aliases_list_->takeItem(selected);alias_error->hide();
+            if(draft_.aliases.empty()){alias_name_->clear();alias_target_->clear();alias_arguments_->clear();}
+        });
+        tabs->addTab(aliases_page,"Aliases");
         auto* updates_page=new QWidget(tabs);auto* updates_layout=new QVBoxLayout(updates_page);
         updates_layout->setContentsMargins(24,16,24,16);updates_layout->setSpacing(16);
         auto* version_label=new QLabel("Fast Palette " FAST_PALETTE_VERSION,updates_page);updates_layout->addWidget(version_label);
@@ -312,7 +355,9 @@ public:
         save_button_->setObjectName(QStringLiteral("saveButton"));
         cancel_button_->setObjectName(QStringLiteral("cancelButton"));
         save_button_->setDefault(true);
-        connect(everything_prefix_,&QLineEdit::textChanged,this,[this](const QString& text){save_button_->setEnabled(valid_everything_prefix(text.toStdWString()));});
+        const auto validate_prefixes=[this]{Settings candidate=draft_;for(size_t i=0;i<module_count;++i)set_module_rule(candidate,static_cast<Module>(i),{module_prefix_[i]->text().toStdWString(),module_only_[i]->isChecked()});
+            std::wstring error;const bool valid=valid_module_settings(candidate,error);save_button_->setEnabled(valid);save_button_->setToolTip(valid?QString{}:QString::fromStdWString(error));};
+        for(size_t i=0;i<module_count;++i){connect(module_prefix_[i],&QLineEdit::textChanged,this,validate_prefixes);connect(module_only_[i],&QCheckBox::toggled,this,validate_prefixes);}
         footer_layout->addWidget(buttons);
         root->addWidget(footer);
         setSizeGripEnabled(true);
@@ -512,13 +557,9 @@ private:
             draft_.right_win = right_win_->isChecked();
             draft_.start_at_login = start_at_login_->isChecked();
             draft_.automatic_updates=automatic_updates_->isChecked();
-            draft_.search_apps=search_apps_->isChecked();
-            draft_.search_calculator=search_calculator_->isChecked();
-            draft_.search_settings=search_settings_->isChecked();
-            draft_.search_paths=search_paths_->isChecked();
-            draft_.search_everything=search_everything_->isChecked();
-            draft_.everything_prefix_only=everything_prefix_only_->isChecked();
-            draft_.everything_prefix=everything_prefix_->text().toStdWString();
+            bool* enabled[]={&draft_.search_apps,&draft_.search_calculator,&draft_.search_settings,&draft_.search_paths,&draft_.search_everything,&draft_.search_conversions,&draft_.search_aliases};
+            for(size_t i=0;i<module_count;++i){*enabled[i]=module_enabled_[i]->isChecked();set_module_rule(draft_,static_cast<Module>(i),{module_prefix_[i]->text().toStdWString(),module_only_[i]->isChecked()});}
+            draft_.calculator_degrees=degrees_->isChecked();
         }
         QDialog::done(result);
     }
@@ -621,7 +662,11 @@ private:
     QPushButton* remove_shortcut_ = nullptr;
     QLabel* status_ = nullptr;
     QCheckBox* start_at_login_ = nullptr;
-    QCheckBox *search_apps_=nullptr,*search_calculator_=nullptr,*search_settings_=nullptr,*search_paths_=nullptr,*search_everything_=nullptr;
+    std::array<QCheckBox*,module_count> module_enabled_{},module_only_{};
+    std::array<QLineEdit*,module_count> module_prefix_{};
+    QCheckBox* degrees_=nullptr;
+    QListWidget* aliases_list_=nullptr;
+    QLineEdit *alias_name_=nullptr,*alias_target_=nullptr,*alias_arguments_=nullptr;
     QToolButton* maximize_=nullptr;
     QCheckBox* automatic_updates_=nullptr;
     QCheckBox* everything_prefix_only_=nullptr;

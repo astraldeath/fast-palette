@@ -15,9 +15,16 @@ constexpr unsigned kMaximumNesting = 64;
 
 enum class ParseIssue { none, incomplete, invalid, mathematical };
 
+bool known_function(std::wstring_view name) {
+    return name == L"sqrt" || name == L"abs" || name == L"sin" || name == L"cos" ||
+           name == L"tan" || name == L"asin" || name == L"acos" || name == L"atan" ||
+           name == L"log" || name == L"log10" || name == L"ln" || name == L"round" ||
+           name == L"floor" || name == L"ceil" || name == L"trunc";
+}
+
 class Parser {
 public:
-    explicit Parser(std::wstring_view input) : input_(input) {}
+    explicit Parser(std::wstring_view input, bool degrees) : input_(input), degrees_(degrees) {}
 
     double parse() {
         const double result = additive();
@@ -83,6 +90,11 @@ private:
                     break;
                 }
                 left /= divisor;
+                finite_or_error(left);
+            } else if (position_ < input_.size() &&
+                       (input_[position_] == L'(' || iswalpha(input_[position_]))) {
+                // Implicit multiplication has the same precedence as * and /.
+                left *= unary();
                 finite_or_error(left);
             } else {
                 break;
@@ -227,10 +239,7 @@ private:
             return std::numbers::e_v<double>;
         }
 
-        const bool known = name == L"sqrt" || name == L"abs" || name == L"sin" ||
-                           name == L"cos" || name == L"tan" || name == L"log10" ||
-                           name == L"ln";
-        if (!known) {
+        if (!known_function(name)) {
             issue_ = ParseIssue::invalid;
             return 0.0;
         }
@@ -252,18 +261,30 @@ private:
         }
 
         double value = 0.0;
+        const double angle = degrees_ ? argument * (std::numbers::pi_v<double> / 180.0) : argument;
         if (name == L"sqrt") value = std::sqrt(argument);
         else if (name == L"abs") value = std::abs(argument);
-        else if (name == L"sin") value = std::sin(argument);
-        else if (name == L"cos") value = std::cos(argument);
-        else if (name == L"tan") value = std::tan(argument);
-        else if (name == L"log10") value = std::log10(argument);
+        else if (name == L"sin") value = std::sin(angle);
+        else if (name == L"cos") value = std::cos(angle);
+        else if (name == L"tan") value = std::tan(angle);
+        else if (name == L"asin") value = std::asin(argument);
+        else if (name == L"acos") value = std::acos(argument);
+        else if (name == L"atan") value = std::atan(argument);
+        else if (name == L"round") value = std::round(argument);
+        else if (name == L"floor") value = std::floor(argument);
+        else if (name == L"ceil") value = std::ceil(argument);
+        else if (name == L"trunc") value = std::trunc(argument);
+        else if (name == L"log10" || name == L"log") value = std::log10(argument);
         else value = std::log(argument);
+        if (degrees_ && (name == L"asin" || name == L"acos" || name == L"atan")) {
+            value *= 180.0 / std::numbers::pi_v<double>;
+        }
         finite_or_error(value);
         return value;
     }
 
     std::wstring_view input_;
+    bool degrees_;
     std::size_t position_ = 0;
     unsigned nesting_ = 0;
     ParseIssue issue_ = ParseIssue::none;
@@ -285,9 +306,7 @@ bool starts_as_calculation(std::wstring_view input) {
     for (wchar_t& character : name) character = static_cast<wchar_t>(towlower(character));
     if (name == L"pi" || name == L"e") return true;
     while (position < input.size() && iswspace(input[position])) ++position;
-    const bool function = name == L"sqrt" || name == L"abs" || name == L"sin" ||
-                          name == L"cos" || name == L"tan" || name == L"log10" || name == L"ln";
-    return function && (position == input.size() || input[position] == L'(');
+    return known_function(name) && (position == input.size() || input[position] == L'(');
 }
 
 std::wstring format_value(double value) {
@@ -303,7 +322,7 @@ std::wstring format_value(double value) {
 
 } // namespace
 
-CalcResult calculate(std::wstring_view expression) {
+CalcResult calculate(std::wstring_view expression, bool degrees) {
     bool forced = false;
     std::size_t first = 0;
     while (first < expression.size() && iswspace(expression[first])) ++first;
@@ -319,7 +338,7 @@ CalcResult calculate(std::wstring_view expression) {
         return {};
     }
 
-    Parser parser(expression);
+    Parser parser(expression, degrees);
     const double value = parser.parse();
     switch (parser.issue()) {
     case ParseIssue::none:

@@ -5,7 +5,7 @@
 
 namespace palette {
 enum class LaunchKind { shortcut, shell, executable };
-enum class SearchSource { application, windows_settings, path, file };
+enum class SearchSource { application, windows_settings, path, file, alias };
 struct AppEntry {
     std::wstring id, name, detail, target;
     LaunchKind kind = LaunchKind::shortcut;
@@ -14,6 +14,7 @@ struct AppEntry {
     std::uint64_t last_used = 0;
     SearchSource source = SearchSource::application;
     bool is_folder = false;
+    std::wstring arguments;
 };
 struct SearchHit { std::size_t index; int score; };
 enum class CalcStatus { none, incomplete, value, error };

@@ -41,10 +41,25 @@ Settings load_settings(const wchar_t* path) {
     s.search_settings=read_dword(key.value,L"SearchSettings",1)!=0;
     s.search_paths=read_dword(key.value,L"SearchPaths",1)!=0;
     s.search_everything=read_dword(key.value,L"SearchEverything",0)!=0;
+    s.search_conversions=read_dword(key.value,L"SearchConversions",1)!=0;
+    s.search_aliases=read_dword(key.value,L"SearchAliases",1)!=0;
+    s.calculator_degrees=read_dword(key.value,L"CalculatorDegrees",0)!=0;
     s.everything_prefix_only=read_dword(key.value,L"EverythingPrefixOnly",0)!=0;
     std::array<wchar_t,18> prefix{};DWORD prefix_bytes=sizeof(prefix);
-    if(RegGetValueW(key.value,nullptr,L"EverythingPrefix",RRF_RT_REG_SZ,nullptr,prefix.data(),&prefix_bytes)==ERROR_SUCCESS && valid_everything_prefix(prefix.data()))
+    if(RegGetValueW(key.value,nullptr,L"EverythingPrefix",RRF_RT_REG_SZ,nullptr,prefix.data(),&prefix_bytes)==ERROR_SUCCESS && (!prefix[0] || valid_everything_prefix(prefix.data())))
         s.everything_prefix=prefix.data();
+    std::array<bool,module_count> stored_prefix{};
+    for(size_t i=0;i<module_count;++i){if(i==static_cast<size_t>(Module::everything))continue;
+        const auto name=std::wstring(module_keys[i])+L"Prefix";prefix.fill(0);prefix_bytes=sizeof(prefix);
+        if(RegGetValueW(key.value,nullptr,name.c_str(),RRF_RT_REG_SZ,nullptr,prefix.data(),&prefix_bytes)==ERROR_SUCCESS){s.prefixes[i].prefix=prefix.data();stored_prefix[i]=true;}
+        s.prefixes[i].only=read_dword(key.value,(name+L"Only").c_str(),0)!=0;
+    }
+    // Existing Everything prefixes predate the other defaults; retain them.
+    const auto preserve_legacy_prefix=[&]{for(size_t i=0;i<module_count;++i)if(i!=static_cast<size_t>(Module::everything) && !stored_prefix[i] &&
+        !s.everything_prefix.empty() && _wcsicmp(s.prefixes[i].prefix.c_str(),s.everything_prefix.c_str())==0)s.prefixes[i].prefix+=L":";};
+    preserve_legacy_prefix();
+    std::wstring validation_error;
+    if(!valid_module_settings(s,validation_error)){s.prefixes=Settings{}.prefixes;stored_prefix.fill(false);if(s.everything_prefix.empty())s.everything_prefix_only=false;preserve_legacy_prefix();}
     const auto mods=read_dword(key.value,L"Modifiers",s.modifiers), vk=read_dword(key.value,L"Key",s.key);
     if (valid_hotkey(mods,vk)) { s.modifiers=mods; s.key=vk; }
     std::array<Hotkey,15> extra{}; DWORD extra_bytes=sizeof(extra);
@@ -62,10 +77,18 @@ Settings load_settings(const wchar_t* path) {
             for (const wchar_t* p=data.data(); *p; p+=wcslen(p)+1) s.portable_apps.emplace_back(p);
         }
     }
+    if(RegGetValueW(key.value,nullptr,L"Aliases",RRF_RT_REG_MULTI_SZ,nullptr,nullptr,&bytes)==ERROR_SUCCESS && bytes<=4*1024*1024){
+        std::vector<wchar_t> data(bytes/sizeof(wchar_t)+2,0);
+        if(RegGetValueW(key.value,nullptr,L"Aliases",RRF_RT_REG_MULTI_SZ,nullptr,data.data(),&bytes)==ERROR_SUCCESS){
+            std::vector<std::wstring> fields;for(const wchar_t* p=data.data();*p && fields.size()<384;p+=wcslen(p)+1)fields.emplace_back(p);
+            for(size_t i=0;i+2<fields.size();i+=3)if(fields[i+2].starts_with(L"="))s.aliases.push_back({fields[i],fields[i+1],fields[i+2].substr(1)});
+            if(!valid_module_settings(s,validation_error))s.aliases.clear();
+        }
+    }
     return s;
 }
 bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) {
-    if(!valid_everything_prefix(s.everything_prefix)){error=L"Use a prefix of 1–16 characters without spaces, not starting with =.";return false;}
+    if(!valid_module_settings(s,error))return false;
     if (!valid_hotkey(s.modifiers,s.key)) { error=L"Choose a key with Ctrl, Alt, Shift, or Win. Win+L and F12 are reserved."; return false; }
     const auto bindings=all_hotkeys(s);
     if(bindings.size()>16) {error=L"Up to 16 keyboard shortcuts are supported.";return false;}
@@ -83,9 +106,19 @@ bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) 
     status=RegSetValueExW(key.value,L"PortableApps",0,REG_MULTI_SZ,reinterpret_cast<const BYTE*>(paths.data()),static_cast<DWORD>(paths.size()*sizeof(wchar_t)));
     if(status==ERROR_SUCCESS) status=RegSetValueExW(key.value,L"ExtraBindings",0,REG_BINARY,reinterpret_cast<const BYTE*>(s.extra_bindings.data()),static_cast<DWORD>(s.extra_bindings.size()*sizeof(Hotkey)));
     if(status==ERROR_SUCCESS)status=RegSetValueExW(key.value,L"EverythingPrefix",0,REG_SZ,reinterpret_cast<const BYTE*>(s.everything_prefix.c_str()),static_cast<DWORD>((s.everything_prefix.size()+1)*sizeof(wchar_t)));
+    for(size_t i=0;i<module_count && status==ERROR_SUCCESS;++i){if(i==static_cast<size_t>(Module::everything))continue;
+        const auto name=std::wstring(module_keys[i])+L"Prefix";const auto& rule=s.prefixes[i];const DWORD only=rule.only;
+        status=RegSetValueExW(key.value,name.c_str(),0,REG_SZ,reinterpret_cast<const BYTE*>(rule.prefix.c_str()),static_cast<DWORD>((rule.prefix.size()+1)*sizeof(wchar_t)));
+        if(status==ERROR_SUCCESS)status=RegSetValueExW(key.value,(name+L"Only").c_str(),0,REG_DWORD,reinterpret_cast<const BYTE*>(&only),sizeof(only));
+    }
+    std::vector<wchar_t> alias_data;
+    for(const auto& alias:s.aliases)for(const auto& field:{alias.name,alias.target,L"="+alias.arguments}){alias_data.insert(alias_data.end(),field.begin(),field.end());alias_data.push_back(0);}
+    alias_data.push_back(0);if(alias_data.size()==1)alias_data.push_back(0);
+    if(status==ERROR_SUCCESS)status=RegSetValueExW(key.value,L"Aliases",0,REG_MULTI_SZ,reinterpret_cast<const BYTE*>(alias_data.data()),static_cast<DWORD>(alias_data.size()*sizeof(wchar_t)));
     const std::pair<const wchar_t*,DWORD> values[]={ {L"LeftWin",s.left_win},{L"RightWin",s.right_win},{L"StartAtLogin",s.start_at_login},{L"Modifiers",s.modifiers},{L"Key",s.key},
         {L"SearchApps",s.search_apps},{L"SearchCalculator",s.search_calculator},{L"SearchSettings",s.search_settings},
-        {L"SearchPaths",s.search_paths},{L"SearchEverything",s.search_everything},{L"EverythingPrefixOnly",s.everything_prefix_only},{L"AutomaticUpdates",s.automatic_updates} };
+        {L"SearchPaths",s.search_paths},{L"SearchEverything",s.search_everything},{L"EverythingPrefixOnly",s.everything_prefix_only},{L"AutomaticUpdates",s.automatic_updates},
+        {L"SearchConversions",s.search_conversions},{L"SearchAliases",s.search_aliases},{L"CalculatorDegrees",s.calculator_degrees} };
     for (const auto& [name,value]:values) if (status==ERROR_SUCCESS) status=RegSetValueExW(key.value,name,0,REG_DWORD,reinterpret_cast<const BYTE*>(&value),sizeof(value));
     if (status!=ERROR_SUCCESS) { error=system_error(status); return false; }
     return true;

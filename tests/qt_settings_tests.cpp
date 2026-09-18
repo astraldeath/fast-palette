@@ -38,7 +38,7 @@ bool same_settings(const palette::Settings& left, const palette::Settings& right
         left.portable_apps == right.portable_apps && left.search_apps==right.search_apps &&
         left.search_calculator==right.search_calculator && left.search_settings==right.search_settings &&
         left.search_paths==right.search_paths && left.search_everything==right.search_everything &&
-        left.everything_prefix_only==right.everything_prefix_only && left.everything_prefix==right.everything_prefix && left.automatic_updates==right.automatic_updates;
+        left.everything_prefix_only==right.everything_prefix_only && left.everything_prefix==right.everything_prefix && left.automatic_updates==right.automatic_updates && left.search_conversions==right.search_conversions && left.search_aliases==right.search_aliases && left.calculator_degrees==right.calculator_degrees && left.prefixes==right.prefixes && left.aliases==right.aliases;
 }
 
 template <typename T>
@@ -109,6 +109,9 @@ void test_visual_snapshot() {
             child<QTabWidget>(dialog,"settingsTabs")->setCurrentIndex(1);
             QApplication::processEvents();
             require(dialog->grab().save(preview_path().replace("settings-preview","search-settings-preview"),"PNG"),"search settings preview");
+            dialog->resize(600,400);QApplication::processEvents();
+            require(child<QScrollArea>(dialog,"moduleScrollArea")->verticalScrollBar()->maximum()>0,"module settings scroll in a short window");
+            dialog->resize(600,640);QApplication::processEvents();
             child<QToolButton>(dialog,"maximizeSettings")->click();
             require(dialog->isMaximized(),"maximize caption button works");
             child<QToolButton>(dialog,"maximizeSettings")->click();
@@ -152,6 +155,9 @@ void test_save_applies_toggles_and_win_r() {
 
     with_dialog([](QWidget* dialog) {
         child<QCheckBox>(dialog,"automaticUpdates")->setChecked(false);
+        child<QCheckBox>(dialog,"searchConversions")->setChecked(false);
+        child<QCheckBox>(dialog,"searchAliases")->setChecked(false);
+        child<QCheckBox>(dialog,"calculatorDegrees")->setChecked(true);
         child<QCheckBox>(dialog,"everythingPrefixOnly")->setChecked(true);
         child<QLineEdit>(dialog,"everythingPrefix")->setText("");
         require(!child<QPushButton>(dialog,"saveButton")->isEnabled(),"empty prefix cannot be saved");
@@ -183,6 +189,7 @@ void test_save_applies_toggles_and_win_r() {
     require(!value.search_apps && !value.search_calculator && !value.search_settings && !value.search_paths && value.search_everything,"Save applies each source toggle");
     require(value.everything_prefix_only && value.everything_prefix==L"ef","Save applies Everything prefix options");
     require(!value.automatic_updates,"Save applies automatic update preference");
+    require(!value.search_conversions && !value.search_aliases && value.calculator_degrees,"Save applies new module and angle settings");
     require(value.extra_bindings.size() == 1 && value.extra_bindings.front() == palette::Hotkey{MOD_WIN, 'R'},
         "Save applies recorded Win+R binding");
 }
@@ -236,11 +243,33 @@ int main(int argc, char** argv) {
     test_visual_snapshot();
     test_cancel_discards_staged_changes();
     test_save_applies_toggles_and_win_r();
+    palette::Settings alias_settings;
+    with_dialog([](QWidget* dialog){
+        child<QTabWidget>(dialog,"settingsTabs")->setCurrentIndex(2);
+        child<QLineEdit>(dialog,"aliasName")->setText("work");
+        child<QLineEdit>(dialog,"aliasTarget")->setText("%appdata%");
+        child<QPushButton>(dialog,"addAlias")->click();
+        require(child<QListWidget>(dialog,"aliasesList")->count()==1,"alias added");
+        child<QPushButton>(dialog,"addAlias")->click();
+        require(child<QListWidget>(dialog,"aliasesList")->count()==1,"duplicate alias rejected");
+        child<QLineEdit>(dialog,"aliasTarget")->setText("notepad.exe");
+        child<QLineEdit>(dialog,"aliasArguments")->setText("notes.txt");
+        child<QPushButton>(dialog,"updateAlias")->click();
+        child<QLineEdit>(dialog,"appsPrefix")->setText("launch");
+        child<QCheckBox>(dialog,"appsPrefixOnly")->setChecked(true);
+        child<QPushButton>(dialog,"saveButton")->click();
+    });
+    require(palette::show_settings_dialog(nullptr,alias_settings),"aliases saved");
+    require(alias_settings.aliases==std::vector<palette::Alias>{{L"work",L"notepad.exe",L"notes.txt"}},"alias update preserves arguments");
+    require(palette::module_rule(alias_settings,palette::Module::apps)==palette::PrefixRule{L"launch",true},"module prefix edits applied");
+    const auto aliases_before=alias_settings.aliases;
+    with_dialog([](QWidget* dialog){child<QListWidget>(dialog,"aliasesList")->setCurrentRow(0);child<QPushButton>(dialog,"removeAlias")->click();child<QPushButton>(dialog,"cancelButton")->click();});
+    require(!palette::show_settings_dialog(nullptr,alias_settings) && alias_settings.aliases==aliases_before,"cancel discards alias removal");
     test_escape_cancels_recording_not_dialog();
     test_missing_release_does_not_block_cancel();
     palette::Settings update_settings;int checks=0;
     with_dialog([](QWidget* dialog){
-        child<QTabWidget>(dialog,"settingsTabs")->setCurrentIndex(2);
+        child<QTabWidget>(dialog,"settingsTabs")->setCurrentIndex(3);
         child<QPushButton>(dialog,"checkUpdates")->click();
         child<QCheckBox>(dialog,"automaticUpdates")->setChecked(false);
         child<QPushButton>(dialog,"cancelButton")->click();

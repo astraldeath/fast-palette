@@ -83,6 +83,60 @@ void calculator_classification_and_bounds() {
            "excessive nesting is bounded");
 }
 
+void calculator_extended_math() {
+    expect_value(L"2(3+4)", 14.0, L"14");
+    expect_value(L"(2+3)(4+5)", 45.0, L"45");
+    expect_value(L"2sin(pi/2)", 2.0, L"2");
+    expect_value(L"6/2(1+2)", 9.0, L"9");
+    expect_value(L"2(3!)^2", 72.0, L"72");
+    expect_value(L"2^3(4)", 32.0, L"32");
+    expect_value(L"2e3", 2000.0, L"2000");
+    expect_value(L"2e-3", 0.002, L".002");
+    expect_value(L"log(100)", 2.0, L"2");
+    expect_value(L"round(-2.5)", -3.0, L"-3");
+    expect_value(L"floor(-2.1)", -3.0, L"-3");
+    expect_value(L"ceil(-2.1)", -2.0, L"-2");
+    expect_value(L"trunc(-2.9)", -2.0, L"-2");
+    const auto pi = palette::calculate(L"pi");
+    const auto implicit = palette::calculate(L"2pi");
+    expect(implicit.status == palette::CalcStatus::value && implicit.value == 2 * pi.value,
+           "number next to pi implicitly multiplies");
+    for (auto input : {L"Log Viewer", L"Round Table", L"Asin Tools", L"Sinatra"})
+        expect(palette::calculate(input).status == palette::CalcStatus::none,
+               "function-like app names remain searchable");
+    for (auto input : {L"log(0)", L"asin(2)", L"acos(-2)", L"2 3", L"2.3.4"})
+        expect(palette::calculate(input).status == palette::CalcStatus::error,
+               "invalid extended math is rejected");
+    for (auto input : {L"2(", L"2sin(", L"log(", L"2e-"})
+        expect(palette::calculate(input).status == palette::CalcStatus::incomplete,
+               "unfinished extended math remains incomplete");
+}
+
+void calculator_angle_units() {
+    const auto check = [](std::wstring_view expression, double expected, bool degrees) {
+        const auto result = palette::calculate(expression, degrees);
+        expect(result.status == palette::CalcStatus::value && std::abs(result.value - expected) < 1e-12,
+               "trigonometry respects the selected angle unit");
+    };
+    check(L"sin(30)", 0.5, true);
+    check(L"cos(60)", 0.5, true);
+    check(L"tan(45)", 1.0, true);
+    check(L"asin(.5)", 30.0, true);
+    check(L"acos(.5)", 60.0, true);
+    check(L"atan(1)", 45.0, true);
+    check(L"sin(pi/2)", 1.0, false);
+    check(L"asin(1)", 1.5707963267948966, false);
+    check(L"acos(-1)", 3.141592653589793, false);
+    check(L"atan(1)", 0.7853981633974483, false);
+    check(L"2sin(30)+round(2.5)", 4.0, true);
+    check(L"sin(asin(.5))", 0.5, true);
+    check(L"ln(e)", 1.0, true);
+    for (bool degrees : {false, true}) {
+        expect(palette::calculate(L"asin(2)", degrees).status == palette::CalcStatus::error,
+               "inverse trig domain errors remain errors in both angle modes");
+    }
+}
+
 void calculator_round_trip_formatting() {
     const std::vector<std::wstring> inputs = {
         L"1/3", L"1e20+1", L"-0.000000123456789", L"pi", L"sin(.5)", L"100!"
@@ -153,6 +207,8 @@ void search_empty_query_usage_order() {
 
 int main() {
     calculator_examples();
+    calculator_extended_math();
+    calculator_angle_units();
     calculator_classification_and_bounds();
     calculator_round_trip_formatting();
     search_ranking();

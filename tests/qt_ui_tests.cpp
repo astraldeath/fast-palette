@@ -22,6 +22,7 @@ int main(int argc,char** argv) {
     int failed=0;
     const auto check=[&](bool value,const char* name){if(!value){++failed;std::cerr<<"FAIL: "<<name<<'\n';}};
     palette::Settings test_settings;test_settings.search_everything=true;test_settings.automatic_updates=false;
+    test_settings.aliases={{L"worktest",L"%appdata%",L""}};
     palette::PaletteWindow window(test_settings);
     check(window.create(GetModuleHandleW(nullptr),true),"framework window created");
     auto* input=window.findChild<QLineEdit*>("queryInput");
@@ -30,6 +31,16 @@ int main(int argc,char** argv) {
     input->setText("2+3*4");
     check(results->count()>0 && results->item(0)->data(Qt::UserRole).toString()=="14","calculator result in framework list");
     check(results->item(0)->toolTip()=="14\nEnter to copy","full result tooltip belongs to hit-tested list item");
+    input->setText("180cm to ftin");
+    check(results->item(0)->data(Qt::UserRole).toString()=="5 ft 10.87 in","conversion appears in palette");
+    input->setText("conv 2MBps to Mbps");
+    check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="16 Mbps","conversion prefix isolates rate conversion");
+    input->setText("@ worktest");
+    check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="worktest","alias prefix resolves alias");
+    input->setText("win bluetooth");
+    check(results->item(0)->toolTip().contains("Windows Settings"),"Windows Settings prefix routes stripped query");
+    input->setText("=2pi");
+    check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString().startsWith("6.283"),"implicit multiplication reaches palette");
     input->setText("hello world");input->setCursorPosition(11);
     QTest::keyClick(input,Qt::Key_Backspace,Qt::ControlModifier);
     check(input->text()=="hello ","framework Ctrl+Backspace deletes word");
@@ -92,11 +103,11 @@ int main(int argc,char** argv) {
     check(settings_opened,"Enter activates focused Settings button");
     window.hide();
     palette::Settings disabled;disabled.search_apps=false;disabled.search_calculator=false;
-    disabled.search_settings=false;disabled.search_paths=false;disabled.search_everything=false;
+    disabled.search_settings=false;disabled.search_paths=false;disabled.search_everything=false;disabled.search_conversions=false;disabled.search_aliases=false;disabled.automatic_updates=false;
     palette::PaletteWindow disabled_window(disabled);
     auto* disabled_input=disabled_window.findChild<QLineEdit*>("queryInput");
     auto* disabled_results=disabled_window.findChild<QListWidget*>("results");
-    for(const auto* query:{"2+2","bluetooth","%appdata%","? Everything.exe"}){
+    for(const auto* query:{"2+2","bluetooth","%appdata%","? Everything.exe","conv 180cm to ftin","@ worktest"}){
         disabled_input->setText(query);QTest::qWait(90);
         check(disabled_results->count()==1 && disabled_results->item(0)->data(Qt::UserRole).toString()=="No results","disabled sources produce no results");}
     std::cout<<"Qt palette checks: "<<(failed?"FAILED":"passed")<<'\n';
