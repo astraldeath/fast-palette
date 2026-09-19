@@ -123,9 +123,9 @@ bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) 
     if (status!=ERROR_SUCCESS) { error=system_error(status); return false; }
     return true;
 }
-bool set_start_at_login(bool enabled, std::wstring& error) {
+bool set_start_at_login(bool enabled, std::wstring& error,const wchar_t* run_key) {
     RegistryKey key;
-    auto status=RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,nullptr,0,KEY_SET_VALUE,nullptr,&key.value,nullptr);
+    auto status=RegCreateKeyExW(HKEY_CURRENT_USER,run_key,0,nullptr,0,KEY_SET_VALUE,nullptr,&key.value,nullptr);
     if (status==ERROR_SUCCESS) {
         if (enabled) {
             std::array<wchar_t,32768> path{};

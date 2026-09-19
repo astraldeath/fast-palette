@@ -20,7 +20,7 @@ Calculator examples: `2pi`, `2(3+4)`, `sqrt(81)`, `2^10`, `100!`, `sin(pi/2)`. S
 
 Convert length, weight, temperature, time, storage, or transfer rates: `180cm to ftin`, `5'11" to cm`, `74in to ftin`, `2gb to mb`, `2 GiB to MiB`, `72f to c`. `ftin` means feet and inches. Storage shorthand `gb`/`mb` means decimal bytes; `GiB`/`MiB` uses 1024. Speeds respect case: `2 MB/s` or `2 MBps` gives `16 Mbps`; `2 mbps` or `2 mb/s` gives `0.25 MB/s`.
 
-Settings are stored in `HKCU\Software\FastPalette`. Disable launch at sign-in before moving the executable. Use the tray menu to exit.
+Settings are stored in `HKCU\Software\FastPalette`. After moving the executable, run it once to update launch at sign-in. Use the tray menu to exit.
 
 Updates install automatically when the palette and Settings are closed. Turn this off or check manually under **Settings → Updates**. Updating verifies the release checksum, replaces the portable executable in place, and restarts it; its folder must be writable. Versions before 1.2.0 need one manual download to get the updater.
 

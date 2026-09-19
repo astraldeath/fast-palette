@@ -346,7 +346,7 @@ void PaletteWindow::edit_settings() {
     if(show_settings_dialog(handle(),draft,[this](std::function<void()> completed){updater_->check(true,std::move(completed));})) {
         std::wstring error;const bool registered=register_bindings(draft);if(!registered)error=L"That shortcut is already in use. Choose another.";
         bool hook=false;if(registered){hook=keyboard_->start(draft.left_win,draft.right_win,all_hotkeys(draft));if(!hook)error=L"Could not install the Windows-key hook.";}
-        const bool login=registered && hook && (draft.start_at_login==settings_.start_at_login || set_start_at_login(draft.start_at_login,error));
+        const bool login=registered && hook && set_start_at_login(draft.start_at_login,error);
         if(login && save_settings(draft,error)){settings_=std::move(draft);aliases_=alias_entries(settings_);updater_->set_automatic(settings_.automatic_updates);hotkey_registered_=true;set_notice({});schedule_sources();update_results();request_catalog();}
         else {unregister_bindings();hotkey_registered_=register_bindings(settings_);keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));
             if(login && draft.start_at_login!=settings_.start_at_login){std::wstring ignored;set_start_at_login(settings_.start_at_login,ignored);}

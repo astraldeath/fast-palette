@@ -63,6 +63,23 @@ int main(int argc, char** argv) {
     set_module_rule(desired,Module::apps,{L"launch",true});
     desired.portable_apps={L"C:\\Program Files\\Example\\example.exe", L"C:\\Portable\\éditeur.exe"};
     std::wstring error;
+    const auto run_path=key+L"-run";
+    check(set_start_at_login(true,error,run_path.c_str()),"startup command registration succeeds");
+    wchar_t startup_command[32768]{},current_exe[32768]{};DWORD startup_bytes=sizeof(startup_command);
+    GetModuleFileNameW(nullptr,current_exe,32768);
+    check(RegGetValueW(HKEY_CURRENT_USER,run_path.c_str(),L"FastPalette",RRF_RT_REG_SZ,nullptr,startup_command,&startup_bytes)==ERROR_SUCCESS &&
+        std::wstring(startup_command)==L"\""+std::wstring(current_exe)+L"\" --background","startup command quotes current executable and starts hidden");
+    HKEY startup_key=nullptr;RegOpenKeyExW(HKEY_CURRENT_USER,run_path.c_str(),0,KEY_SET_VALUE,&startup_key);
+    const wchar_t obsolete[]=L"\"C:\\Old Palette\\FastPalette.exe\" --background";
+    RegSetValueExW(startup_key,L"FastPalette",0,REG_SZ,reinterpret_cast<const BYTE*>(obsolete),sizeof(obsolete));RegCloseKey(startup_key);
+    check(set_start_at_login(true,error,run_path.c_str()),"enabled startup registration can repair old path");
+    startup_bytes=sizeof(startup_command);
+    check(RegGetValueW(HKEY_CURRENT_USER,run_path.c_str(),L"FastPalette",RRF_RT_REG_SZ,nullptr,startup_command,&startup_bytes)==ERROR_SUCCESS &&
+        std::wstring(startup_command)==L"\""+std::wstring(current_exe)+L"\" --background","stale startup path is replaced");
+    check(set_start_at_login(false,error,run_path.c_str()) &&
+        RegGetValueW(HKEY_CURRENT_USER,run_path.c_str(),L"FastPalette",RRF_RT_REG_SZ,nullptr,nullptr,&startup_bytes)==ERROR_FILE_NOT_FOUND,"disable removes startup registration");
+    check(set_start_at_login(false,error,run_path.c_str()),"disabling absent startup registration succeeds");
+    RegDeleteTreeW(HKEY_CURRENT_USER,run_path.c_str());
     check(save_settings(desired,error,key.c_str()), "settings save");
     const auto actual=load_settings(key.c_str());
     check(!actual.left_win && actual.right_win && actual.modifiers==(MOD_CONTROL|MOD_SHIFT) && actual.key=='P', "settings roundtrip");

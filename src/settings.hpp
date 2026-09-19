@@ -52,7 +52,8 @@ void set_module_rule(Settings& settings,Module module,const PrefixRule& rule);
 bool module_enabled(const Settings& settings,Module module);
 bool valid_module_settings(const Settings& settings,std::wstring& error);
 bool save_settings(const Settings& settings, std::wstring& error, const wchar_t* key = settings_key);
-bool set_start_at_login(bool enabled, std::wstring& error);
+bool set_start_at_login(bool enabled, std::wstring& error,
+    const wchar_t* run_key=L"Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 void load_usage(std::vector<AppEntry>& apps);
 void save_usage(const AppEntry& app);
 bool valid_hotkey(UINT modifiers, UINT key);
