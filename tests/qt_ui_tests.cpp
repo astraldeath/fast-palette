@@ -47,6 +47,10 @@ int main(int argc,char** argv) {
     check(results->item(0)->toolTip().contains("Windows Settings"),"Windows Settings prefix routes stripped query");
     input->setText("=2pi");
     check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString().startsWith("6"+QLocale::system().decimalPoint()+"283"),"implicit multiplication reaches palette");
+    input->setText("100,000 + 2");
+    check(results->item(0)->data(Qt::UserRole).toString()==palette::localized_number_result("100002"),"calculator accepts grouped input");
+    input->setText("conv 100,000cm to m");
+    check(results->item(0)->data(Qt::UserRole).toString()==palette::localized_number_result("1000 m"),"unit conversion accepts grouped input");
     input->setText("1e6");
     check(results->item(0)->data(Qt::UserRole).toString()==QLocale::system().toString(1000000),"scientific input displays expanded localized integer");
     input->setText("1e-6");
@@ -91,7 +95,7 @@ int main(int argc,char** argv) {
     std::sort(samples.begin(),samples.end());
     std::cout<<"Query + widget update milliseconds: p50="<<samples[14]<<" p95="<<samples[28]<<'\n';
     if(application.arguments().contains("--currency-live")){
-        for(const auto* query:{"usd to yen","100 usd to won","fx 5 btc to xmr"}){
+        for(const auto* query:{"100,000 usd to yen","100 usd to won","fx 5 btc to xmr"}){
             input->setText(query);QElapsedTimer wait;wait.start();
             while(wait.elapsed()<18000 && !results->item(0)->toolTip().contains("rates ·"))QTest::qWait(20);
             check(results->item(0)->toolTip().contains("rates ·"),"live currency result includes rate date");

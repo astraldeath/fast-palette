@@ -1,4 +1,5 @@
 #include "currency.hpp"
+#include "number_format.hpp"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -39,7 +40,7 @@ struct InternetHandle {HINTERNET value=nullptr;~InternetHandle(){if(value)WinHtt
 }
 std::optional<CurrencyQuery> parse_currency_query(QString text){
     if(text.size()>512)return {};
-    text=text.simplified().toLower();
+    text=normalize_number_input(text).simplified().toLower();
     static const QRegularExpression syntax("^(?:([+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:e[+-]?[0-9]+)?)\\s*)?([a-z][a-z0-9 ]*?)\\s+to\\s+([a-z][a-z0-9 ]*)$");
     const auto match=syntax.match(text);if(!match.hasMatch())return {};
     CurrencyQuery query;query.from=currency_code(match.captured(2));query.to=currency_code(match.captured(3));
@@ -70,7 +71,9 @@ CalcResult convert_currency(const CurrencyQuery& query,const CurrencyRates& rate
     if(!std::isfinite(query.amount)||!std::isfinite(*from)||!std::isfinite(*to)||*from<=0||*to<=0)return {CalcStatus::error,0,L"Invalid currency amount or rate"};
     const double value=query.amount / *from * *to;
     if(!std::isfinite(value))return {CalcStatus::error,0,L"Currency result is out of range"};
-    return {CalcStatus::value,value,(QString::number(value==0?0:value,'g',12)+" "+query.to.toUpper()).toStdWString()};
+    auto formatted=std::abs(value)>0 && std::abs(value)<0.0001?QString::number(value,'g',4):QString::number(value==0?0:value,'f',4);
+    if(!formatted.contains('e') && formatted.contains('.')){while(formatted.endsWith('0'))formatted.chop(1);if(formatted.endsWith('.'))formatted.chop(1);}
+    return {CalcStatus::value,value,(formatted+" "+query.to.toUpper()).toStdWString()};
 }
 QByteArray download_currency_rates(std::stop_token stop){
     if(stop.stop_requested())return {};

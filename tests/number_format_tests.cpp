@@ -20,5 +20,10 @@ int main(){int failed=0;const auto check=[&](bool ok,const char* name){if(!ok){+
         const auto value=calculate(input);const auto plain=plain_number_result(QString::fromStdWString(value.text));bool ok=false;
         check(plain.toDouble(&ok)==value.value && ok && !plain.contains('e',Qt::CaseInsensitive),"expanded decimal round trips without changing value");
     }
+    check(normalize_number_input("100,000.25 usd to yen",en)=="100000.25 usd to yen","grouped currency input");
+    check(normalize_number_input("100.000,25 + 1",de)=="100000.25 + 1","localized input");
+    check(normalize_number_input("100,00",en)=="100,00","malformed grouping remains invalid");
+    check(normalize_number_input("1,000,000 + 2,000",en)=="1000000 + 2000","multiple grouped numbers");
+    check(normalize_number_input("1.25e-6",en)=="1.25e-6","scientific input preserved");
     return failed?1:0;
 }

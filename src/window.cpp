@@ -204,11 +204,11 @@ void PaletteWindow::update_results(bool preserve) {
     rows_.clear();
     const auto route=route_query(query_,settings_);
     const bool files_only=route.exclusive==Module::everything;
-    const auto conversion=route.allows(Module::conversions)?convert_units(route.text):CalcResult{};
+    const auto conversion=route.allows(Module::conversions)?convert_units(normalize_number_input(qs(route.text)).toStdWString()):CalcResult{};
     const auto money=route.allows(Module::currency) && conversion.status==CalcStatus::none?parse_currency_query(qs(route.text)):std::optional<CurrencyQuery>{};
     const auto money_result=money?(currency_?currency_->convert(*money):CalcResult{CalcStatus::incomplete,0,L"Fetching currency rates..."}):CalcResult{};
     const auto math=route.allows(Module::calculator) && conversion.status==CalcStatus::none && !money?
-        calculate(route.exclusive==Module::calculator?L"="+route.text:route.text,settings_.calculator_degrees):CalcResult{};
+        calculate(normalize_number_input(qs(route.exclusive==Module::calculator?L"="+route.text:route.text)).toStdWString(),settings_.calculator_degrees):CalcResult{};
     const auto calc=money?money_result:conversion.status!=CalcStatus::none?conversion:math;
     const bool forced=route.exclusive==Module::calculator || route.exclusive==Module::conversions || route.exclusive==Module::currency;
     const auto first=route.text.find_first_not_of(L" \t\r\n");
@@ -325,7 +325,7 @@ void PaletteWindow::schedule_sources() {
     currency_timer_->stop();
     ++source_generation_;source_timer_->stop();source_results_.clear();everything_available_=true;
     const auto route=route_query(query_,settings_);
-    if(route.allows(Module::currency) && (!route.allows(Module::conversions) || convert_units(route.text).status==CalcStatus::none) && parse_currency_query(qs(route.text)))currency_timer_->start();
+    if(route.allows(Module::currency) && (!route.allows(Module::conversions) || convert_units(normalize_number_input(qs(route.text)).toStdWString()).status==CalcStatus::none) && parse_currency_query(qs(route.text)))currency_timer_->start();
     const auto trimmed=QString::fromStdWString(route.text).trimmed();
     sources_pending_=!trimmed.isEmpty() &&
         ((route.allows(Module::paths) && !expand_path_query(route.text).empty()) || route.allows(Module::everything));

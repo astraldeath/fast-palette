@@ -54,6 +54,22 @@ QString localize(QString number,const QLocale& locale) {
     return sign+output;
 }
 }
+QString normalize_number_input(const QString& input,const QLocale& locale){
+    static const QRegularExpression token("[0-9]+(?:[.,\\x{00a0}\\x{202f} ][0-9]+)*(?:[eE][+-]?[0-9]+)?");
+    const QLocale english(QLocale::English,QLocale::UnitedStates);
+    QString output;qsizetype position=0;auto matches=token.globalMatch(input);
+    while(matches.hasNext()){
+        const auto match=matches.next();auto number=match.captured();
+        if(number.contains(',') || number.contains(locale.groupSeparator())){
+            bool valid=false;locale.toDouble(number,&valid);
+            const auto& selected=valid?locale:english;
+            if(!valid)english.toDouble(number,&valid);
+            if(valid){number.remove(selected.groupSeparator());number.replace(selected.decimalPoint(),".");}
+        }
+        output+=input.mid(position,match.capturedStart()-position)+number;position=match.capturedEnd();
+    }
+    return output+input.mid(position);
+}
 QString plain_number_result(const QString& result){return map_numbers(result,[](const QString& number){return number;});}
 QString localized_number_result(const QString& result,const QLocale& locale){return map_numbers(result,[&](const QString& number){return localize(number,locale);});}
 }
