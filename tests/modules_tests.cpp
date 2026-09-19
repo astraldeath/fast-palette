@@ -13,6 +13,12 @@ int main(){int failed=0;const auto check=[&](bool value,const char* name){if(!va
     s.search_apps=false;check(!route_query(L"apps notepad",s).allows(Module::apps),"disabled module stays disabled with prefix");
     route=route_query(L"?  regex:^a.*$ | ext:txt",s);
     check(route.text==L" regex:^a.*$ | ext:txt" && route.exclusive==Module::everything,"Everything syntax retained after separator");
+    route=route_query(L"fx usd to yen",s);
+    check(route.exclusive==Module::currency && route.text==L"usd to yen" && !route.allows(Module::conversions),"currency prefix isolates conversions");
+    set_module_rule(s,Module::currency,{L"fx",true});
+    check(!route_query(L"usd to won",s).allows(Module::currency),"currency prefix-only excludes unprefixed queries");
+    s.search_currency=false;
+    check(!route_query(L"fx usd to yen",s).allows(Module::currency),"disabled currency prefix stays disabled");
     std::wstring error;set_module_rule(s,Module::paths,{L"win",false});check(!valid_module_settings(s,error),"duplicate prefixes rejected");
     set_module_rule(s,Module::paths,{L"",false});check(valid_module_settings(s,error),"optional prefix can be cleared");
     set_module_rule(s,Module::paths,{L"",true});check(!valid_module_settings(s,error),"prefix-only needs prefix");

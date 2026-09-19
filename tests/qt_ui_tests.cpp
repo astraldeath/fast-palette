@@ -37,6 +37,10 @@ int main(int argc,char** argv) {
     check(results->item(0)->data(Qt::UserRole).toString()==palette::localized_number_result("5 ft 10.87 in"),"conversion appears in palette");
     input->setText("conv 2MBps to Mbps");
     check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="16 Mbps","conversion prefix isolates rate conversion");
+    input->setText("usd to won");
+    check(results->item(0)->data(Qt::UserRole).toString()=="Fetching currency rates...","fiat query works without prefix");
+    input->setText("fx usd to yen");
+    check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="Fetching currency rates...","currency query shows pending result without blocking");
     input->setText("@ worktest");
     check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="worktest","alias prefix resolves alias");
     input->setText("win bluetooth");
@@ -86,6 +90,14 @@ int main(int argc,char** argv) {
     }
     std::sort(samples.begin(),samples.end());
     std::cout<<"Query + widget update milliseconds: p50="<<samples[14]<<" p95="<<samples[28]<<'\n';
+    if(application.arguments().contains("--currency-live")){
+        for(const auto* query:{"usd to yen","100 usd to won","fx 5 btc to xmr"}){
+            input->setText(query);QElapsedTimer wait;wait.start();
+            while(wait.elapsed()<18000 && !results->item(0)->toolTip().contains("rates ·"))QTest::qWait(20);
+            check(results->item(0)->toolTip().contains("rates ·"),"live currency result includes rate date");
+        }
+        window.grab().save(QCoreApplication::applicationDirPath()+"/../currency-preview.png");
+    }
     bool settings_opened=false;
     auto* settings=window.findChild<QToolButton*>("settingsButton");
     input->setText("bluetooth");
@@ -96,7 +108,7 @@ int main(int argc,char** argv) {
     const auto appdata=QString::fromStdWString(palette::expand_path_query(L"%appdata%"));
     while(path_wait.elapsed()<2000 && !results->item(0)->toolTip().contains(appdata))QTest::qWait(20);
     check(results->item(0)->toolTip().contains(appdata),"current environment path wins over superseded query");
-    if(argc>1){input->setText("? Everything.exe");QElapsedTimer files_wait;files_wait.start();
+    if(argc>1 && !application.arguments().contains("--currency-live")){input->setText("? Everything.exe");QElapsedTimer files_wait;files_wait.start();
         while(files_wait.elapsed()<2000 && !results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive))QTest::qWait(20);
         check(results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive),"Everything results reach the palette");
         window.grab().save(QCoreApplication::applicationDirPath()+"/../everything-preview.png");}
@@ -109,11 +121,11 @@ int main(int argc,char** argv) {
     check(settings_opened,"Enter activates focused Settings button");
     window.hide();
     palette::Settings disabled;disabled.search_apps=false;disabled.search_calculator=false;
-    disabled.search_settings=false;disabled.search_paths=false;disabled.search_everything=false;disabled.search_conversions=false;disabled.search_aliases=false;disabled.automatic_updates=false;
+    disabled.search_settings=false;disabled.search_paths=false;disabled.search_everything=false;disabled.search_conversions=false;disabled.search_aliases=false;disabled.search_currency=false;disabled.automatic_updates=false;
     palette::PaletteWindow disabled_window(disabled);
     auto* disabled_input=disabled_window.findChild<QLineEdit*>("queryInput");
     auto* disabled_results=disabled_window.findChild<QListWidget*>("results");
-    for(const auto* query:{"2+2","bluetooth","%appdata%","? Everything.exe","conv 180cm to ftin","@ worktest"}){
+    for(const auto* query:{"2+2","bluetooth","%appdata%","? Everything.exe","conv 180cm to ftin","@ worktest","fx usd to yen"}){
         disabled_input->setText(query);QTest::qWait(90);
         check(disabled_results->count()==1 && disabled_results->item(0)->data(Qt::UserRole).toString()=="No results","disabled sources produce no results");}
     std::cout<<"Qt palette checks: "<<(failed?"FAILED":"passed")<<'\n';

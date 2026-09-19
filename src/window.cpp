@@ -4,6 +4,7 @@
 #include "modules.hpp"
 #include "conversions.hpp"
 #include "number_format.hpp"
+#include "currency.hpp"
 #include "updater.hpp"
 #include "ui_theme.hpp"
 #include "win_util.hpp"
@@ -69,6 +70,8 @@ PaletteWindow::PaletteWindow(Settings settings):QWidget(nullptr,Qt::Tool|Qt::Fra
     setTabOrder(edit_,list_);setTabOrder(list_,settings_button_);
     edit_->installEventFilter(this);list_->installEventFilter(this);settings_button_->installEventFilter(this);
     source_timer_=new QTimer(this);source_timer_->setSingleShot(true);source_timer_->setInterval(70);
+    currency_timer_=new QTimer(this);currency_timer_->setSingleShot(true);currency_timer_->setInterval(200);
+    connect(currency_timer_,&QTimer::timeout,this,[this]{request_currency();});
     connect(source_timer_,&QTimer::timeout,this,[this]{request_sources();});
     connect(edit_,&QLineEdit::textChanged,this,[this](const QString& value){query_=value.toStdWString();set_notice({});schedule_sources();update_results();});
     connect(edit_,&QLineEdit::returnPressed,this,[this]{activate();});
@@ -83,6 +86,7 @@ PaletteWindow::PaletteWindow(Settings settings):QWidget(nullptr,Qt::Tool|Qt::Fra
     set_notice({});
 }
 PaletteWindow::~PaletteWindow() {
+    currency_.reset();
     updater_.reset();
     if(keyboard_)keyboard_->stop();
     ++source_generation_;source_worker_.stop();
@@ -201,10 +205,12 @@ void PaletteWindow::update_results(bool preserve) {
     const auto route=route_query(query_,settings_);
     const bool files_only=route.exclusive==Module::everything;
     const auto conversion=route.allows(Module::conversions)?convert_units(route.text):CalcResult{};
-    const auto math=route.allows(Module::calculator) && conversion.status==CalcStatus::none?
+    const auto money=route.allows(Module::currency) && conversion.status==CalcStatus::none?parse_currency_query(qs(route.text)):std::optional<CurrencyQuery>{};
+    const auto money_result=money?(currency_?currency_->convert(*money):CalcResult{CalcStatus::incomplete,0,L"Fetching currency rates..."}):CalcResult{};
+    const auto math=route.allows(Module::calculator) && conversion.status==CalcStatus::none && !money?
         calculate(route.exclusive==Module::calculator?L"="+route.text:route.text,settings_.calculator_degrees):CalcResult{};
-    const auto calc=conversion.status!=CalcStatus::none?conversion:math;
-    const bool forced=route.exclusive==Module::calculator || route.exclusive==Module::conversions;
+    const auto calc=money?money_result:conversion.status!=CalcStatus::none?conversion:math;
+    const bool forced=route.exclusive==Module::calculator || route.exclusive==Module::conversions || route.exclusive==Module::currency;
     const auto first=route.text.find_first_not_of(L" \t\r\n");
     std::vector<AppEntry> candidates;
     candidates.reserve(21);
@@ -213,9 +219,9 @@ void PaletteWindow::update_results(bool preserve) {
     if(route.allows(Module::settings) && first!=std::wstring::npos)collect(windows_settings());
     if(route.allows(Module::aliases))collect(aliases_);
     const auto hits=search(candidates,route.text,7);
-    if(calc.status==CalcStatus::value)rows_.push_back({localized_number_result(qs(calc.text)).toStdWString(),L"Enter to copy",{},true,L"calculation",plain_number_result(qs(calc.text)).toStdWString()});
-    else if(calc.status==CalcStatus::error && hits.empty())rows_.push_back({calc.text,L"Check the expression",{},false,L"error"});
-    else if(calc.status==CalcStatus::incomplete && hits.empty())rows_.push_back({L"Keep typing",L"Incomplete expression",{},false,L"incomplete"});
+    if(calc.status==CalcStatus::value)rows_.push_back({localized_number_result(qs(calc.text)).toStdWString(),money && currency_?currency_->detail().toStdWString():L"Enter to copy",{},true,L"calculation",plain_number_result(qs(calc.text)).toStdWString()});
+    else if(calc.status==CalcStatus::error && hits.empty())rows_.push_back({calc.text,money?L"":L"Check the expression",{},false,L"error"});
+    else if(calc.status==CalcStatus::incomplete && hits.empty())rows_.push_back({money?calc.text:L"Keep typing",money?L"":L"Incomplete expression",{},false,L"incomplete"});
     if(!forced){
         for(const auto& entry:source_results_)if(entry.source==SearchSource::path)rows_.push_back({entry.name,entry.detail,entry,false,entry.id});
         const auto file_count=std::count_if(source_results_.begin(),source_results_.end(),[](const auto& e){return e.source==SearchSource::file;});
@@ -243,7 +249,7 @@ void PaletteWindow::update_results(bool preserve) {
         auto* title=new QLabel(content);title->setTextFormat(Qt::PlainText);QFont font=title->font();font.setPixelSize(row.copy?21:15);title->setFont(font);
         title->setText(title->fontMetrics().elidedText(qs(row.title),Qt::ElideRight,width()-104));title->setMinimumWidth(0);labels->addWidget(title);
         auto* detail=new QLabel(content);detail->setTextFormat(Qt::PlainText);detail->setProperty("muted",true);QFont small_font=detail->font();small_font.setPixelSize(12);detail->setFont(small_font);
-        detail->setVisible(!row.detail.empty() && row.detail!=L"Application" && !row.copy);
+        detail->setVisible(!row.detail.empty() && row.detail!=L"Application" && row.detail!=L"Enter to copy");
         detail->setText(detail->fontMetrics().elidedText(qs(row.detail),Qt::ElideMiddle,width()-104));detail->setMinimumWidth(0);labels->addWidget(detail);
         horizontal->addLayout(labels,1);list_->setItemWidget(item,content);if(row.identity==old)selected=static_cast<int>(i);
     }
@@ -316,12 +322,20 @@ void PaletteWindow::request_icons() {
             {std::lock_guard lock(inbox_mutex_);pending_icons_.emplace_back(app.id,icon);}PostMessageW(host_,msg_icons,0,0);});}
 }
 void PaletteWindow::schedule_sources() {
+    currency_timer_->stop();
     ++source_generation_;source_timer_->stop();source_results_.clear();everything_available_=true;
     const auto route=route_query(query_,settings_);
+    if(route.allows(Module::currency) && (!route.allows(Module::conversions) || convert_units(route.text).status==CalcStatus::none) && parse_currency_query(qs(route.text)))currency_timer_->start();
     const auto trimmed=QString::fromStdWString(route.text).trimmed();
     sources_pending_=!trimmed.isEmpty() &&
         ((route.allows(Module::paths) && !expand_path_query(route.text).empty()) || route.allows(Module::everything));
     if(sources_pending_)source_timer_->start();
+}
+void PaletteWindow::request_currency() {
+    const auto route=route_query(query_,settings_);
+    if(!route.allows(Module::currency) || !parse_currency_query(qs(route.text)))return;
+    if(!currency_)currency_=std::make_unique<CurrencyService>(this,[this]{update_results(true);});
+    currency_->request();
 }
 void PaletteWindow::request_sources() {
     const auto generation=source_generation_.load();const auto query=query_;const auto settings=settings_;

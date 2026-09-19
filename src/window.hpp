@@ -18,6 +18,7 @@ class QSystemTrayIcon;
 class QTimer;
 namespace palette {
 class Updater;
+class CurrencyService;
 inline constexpr wchar_t window_class[]=L"FastPalette.Window";
 inline constexpr wchar_t invoke_message[]=L"FastPalette.Invoke.1";
 inline constexpr UINT msg_invoke=WM_APP+1,msg_catalog=WM_APP+2,msg_icons=WM_APP+3,
@@ -46,6 +47,7 @@ private:
     void request_icons();
     void schedule_sources();
     void request_sources();
+    void request_currency();
     void edit_settings();
     bool register_bindings(const Settings& settings);
     void unregister_bindings();
@@ -63,6 +65,7 @@ private:
     QSystemTrayIcon* tray_=nullptr;
     QTimer* refresh_timer_=nullptr;
     QTimer* source_timer_=nullptr;
+    QTimer* currency_timer_=nullptr;
     UINT registered_invoke_=0;
     ULONG shell_notify_=0;
     bool loading_=false,refresh_again_=false,launching_=false,settings_open_=false,hotkey_registered_=false;
@@ -71,6 +74,7 @@ private:
     size_t registered_bindings_=0;
     std::unique_ptr<KeyboardHook> keyboard_;
     std::unique_ptr<Updater> updater_;
+    std::unique_ptr<CurrencyService> currency_;
     Worker worker_;
     Worker source_worker_;
     std::atomic<std::uint64_t> source_generation_{0};

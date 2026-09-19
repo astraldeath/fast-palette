@@ -43,6 +43,7 @@ Settings load_settings(const wchar_t* path) {
     s.search_everything=read_dword(key.value,L"SearchEverything",0)!=0;
     s.search_conversions=read_dword(key.value,L"SearchConversions",1)!=0;
     s.search_aliases=read_dword(key.value,L"SearchAliases",1)!=0;
+    s.search_currency=read_dword(key.value,L"SearchCurrency",1)!=0;
     s.calculator_degrees=read_dword(key.value,L"CalculatorDegrees",0)!=0;
     s.everything_prefix_only=read_dword(key.value,L"EverythingPrefixOnly",0)!=0;
     std::array<wchar_t,18> prefix{};DWORD prefix_bytes=sizeof(prefix);
@@ -54,9 +55,11 @@ Settings load_settings(const wchar_t* path) {
         if(RegGetValueW(key.value,nullptr,name.c_str(),RRF_RT_REG_SZ,nullptr,prefix.data(),&prefix_bytes)==ERROR_SUCCESS){s.prefixes[i].prefix=prefix.data();stored_prefix[i]=true;}
         s.prefixes[i].only=read_dword(key.value,(name+L"Only").c_str(),0)!=0;
     }
-    // Existing Everything prefixes predate the other defaults; retain them.
-    const auto preserve_legacy_prefix=[&]{for(size_t i=0;i<module_count;++i)if(i!=static_cast<size_t>(Module::everything) && !stored_prefix[i] &&
-        !s.everything_prefix.empty() && _wcsicmp(s.prefixes[i].prefix.c_str(),s.everything_prefix.c_str())==0)s.prefixes[i].prefix+=L":";};
+    // New module defaults must yield to existing user-defined prefixes.
+    const auto preserve_legacy_prefix=[&]{for(size_t i=0;i<module_count;++i)if(i!=static_cast<size_t>(Module::everything) && !stored_prefix[i]){
+        bool conflict=true;while(conflict){conflict=false;for(size_t j=0;j<module_count;++j)if(i!=j &&
+            _wcsicmp(s.prefixes[i].prefix.c_str(),module_rule(s,static_cast<Module>(j)).prefix.c_str())==0){s.prefixes[i].prefix+=L":";conflict=true;break;}}
+    }};
     preserve_legacy_prefix();
     std::wstring validation_error;
     if(!valid_module_settings(s,validation_error)){s.prefixes=Settings{}.prefixes;stored_prefix.fill(false);if(s.everything_prefix.empty())s.everything_prefix_only=false;preserve_legacy_prefix();}
@@ -118,7 +121,7 @@ bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) 
     const std::pair<const wchar_t*,DWORD> values[]={ {L"LeftWin",s.left_win},{L"RightWin",s.right_win},{L"StartAtLogin",s.start_at_login},{L"Modifiers",s.modifiers},{L"Key",s.key},
         {L"SearchApps",s.search_apps},{L"SearchCalculator",s.search_calculator},{L"SearchSettings",s.search_settings},
         {L"SearchPaths",s.search_paths},{L"SearchEverything",s.search_everything},{L"EverythingPrefixOnly",s.everything_prefix_only},{L"AutomaticUpdates",s.automatic_updates},
-        {L"SearchConversions",s.search_conversions},{L"SearchAliases",s.search_aliases},{L"CalculatorDegrees",s.calculator_degrees} };
+        {L"SearchConversions",s.search_conversions},{L"SearchAliases",s.search_aliases},{L"SearchCurrency",s.search_currency},{L"CalculatorDegrees",s.calculator_degrees} };
     for (const auto& [name,value]:values) if (status==ERROR_SUCCESS) status=RegSetValueExW(key.value,name,0,REG_DWORD,reinterpret_cast<const BYTE*>(&value),sizeof(value));
     if (status!=ERROR_SUCCESS) { error=system_error(status); return false; }
     return true;

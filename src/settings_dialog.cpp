@@ -265,8 +265,8 @@ public:
         auto* search_page = new QWidget(tabs);
         auto* search_layout = new QVBoxLayout(search_page);
         search_layout->setContentsMargins(24,16,24,16);search_layout->setSpacing(10);
-        const char* names[]={"searchApps","searchCalculator","searchSettings","searchPaths","searchEverything","searchConversions","searchAliases"};
-        const char* labels[]={"Applications","Calculator","Windows Settings","Paths","Everything","Unit conversions","Aliases"};
+        const char* names[]={"searchApps","searchCalculator","searchSettings","searchPaths","searchEverything","searchConversions","searchAliases","searchCurrency"};
+        const char* labels[]={"Applications","Calculator","Windows Settings","Paths","Everything","Unit conversions","Aliases","Currency"};
         for(size_t i=0;i<module_count;++i){
             const auto module=static_cast<Module>(i);const auto rule=module_rule(draft_,module);
             auto* row=new QHBoxLayout;
@@ -282,6 +282,7 @@ public:
             module_only_[i]->setAccessibleName(QString(labels[i])+" only with prefix");row->addWidget(module_only_[i]);
             auto enable=[this,i](bool value){module_prefix_[i]->setEnabled(value);module_only_[i]->setEnabled(value);};
             connect(module_enabled_[i],&QCheckBox::toggled,this,enable);enable(module_enabled_[i]->isChecked());
+            if(module==Module::currency)module_enabled_[i]->setToolTip("Fiat and crypto conversions using daily online rates. Cached rates work offline.");
             search_layout->addLayout(row);
         }
         everything_prefix_=module_prefix_[static_cast<size_t>(Module::everything)];
@@ -557,7 +558,7 @@ private:
             draft_.right_win = right_win_->isChecked();
             draft_.start_at_login = start_at_login_->isChecked();
             draft_.automatic_updates=automatic_updates_->isChecked();
-            bool* enabled[]={&draft_.search_apps,&draft_.search_calculator,&draft_.search_settings,&draft_.search_paths,&draft_.search_everything,&draft_.search_conversions,&draft_.search_aliases};
+            bool* enabled[]={&draft_.search_apps,&draft_.search_calculator,&draft_.search_settings,&draft_.search_paths,&draft_.search_everything,&draft_.search_conversions,&draft_.search_aliases,&draft_.search_currency};
             for(size_t i=0;i<module_count;++i){*enabled[i]=module_enabled_[i]->isChecked();set_module_rule(draft_,static_cast<Module>(i),{module_prefix_[i]->text().toStdWString(),module_only_[i]->isChecked()});}
             draft_.calculator_degrees=degrees_->isChecked();
         }

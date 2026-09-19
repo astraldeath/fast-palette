@@ -20,6 +20,7 @@ bool module_enabled(const Settings& s,Module module) {
     case Module::everything:return s.search_everything;
     case Module::conversions:return s.search_conversions;
     case Module::aliases:return s.search_aliases;
+    case Module::currency:return s.search_currency;
     default:return false;
     }
 }

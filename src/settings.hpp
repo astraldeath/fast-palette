@@ -11,9 +11,9 @@ struct Hotkey {
     UINT modifiers=0, key=0;
     bool operator==(const Hotkey&) const = default;
 };
-enum class Module : size_t { apps, calculator, settings, paths, everything, conversions, aliases, count };
+enum class Module : size_t { apps, calculator, settings, paths, everything, conversions, aliases, currency, count };
 inline constexpr size_t module_count=static_cast<size_t>(Module::count);
-inline constexpr std::array<const wchar_t*,module_count> module_keys={L"Apps",L"Calculator",L"Settings",L"Paths",L"Everything",L"Conversions",L"Aliases"};
+inline constexpr std::array<const wchar_t*,module_count> module_keys={L"Apps",L"Calculator",L"Settings",L"Paths",L"Everything",L"Conversions",L"Aliases",L"Currency"};
 struct PrefixRule {
     std::wstring prefix;
     bool only=false;
@@ -37,8 +37,9 @@ struct Settings {
     std::wstring everything_prefix = L"?";
     bool search_conversions = true;
     bool search_aliases = true;
+    bool search_currency = true;
     bool calculator_degrees = false;
-    std::array<PrefixRule,module_count> prefixes={PrefixRule{L"app"},PrefixRule{L"="},PrefixRule{L"win"},PrefixRule{L"path"},PrefixRule{L"?"},PrefixRule{L"conv"},PrefixRule{L"@"}};
+    std::array<PrefixRule,module_count> prefixes={PrefixRule{L"app"},PrefixRule{L"="},PrefixRule{L"win"},PrefixRule{L"path"},PrefixRule{L"?"},PrefixRule{L"conv"},PrefixRule{L"@"},PrefixRule{L"fx"}};
     std::vector<Alias> aliases;
     UINT modifiers = MOD_CONTROL | MOD_ALT;
     UINT key = VK_SPACE;

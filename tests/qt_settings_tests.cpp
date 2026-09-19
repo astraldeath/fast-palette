@@ -38,7 +38,7 @@ bool same_settings(const palette::Settings& left, const palette::Settings& right
         left.portable_apps == right.portable_apps && left.search_apps==right.search_apps &&
         left.search_calculator==right.search_calculator && left.search_settings==right.search_settings &&
         left.search_paths==right.search_paths && left.search_everything==right.search_everything &&
-        left.everything_prefix_only==right.everything_prefix_only && left.everything_prefix==right.everything_prefix && left.automatic_updates==right.automatic_updates && left.search_conversions==right.search_conversions && left.search_aliases==right.search_aliases && left.calculator_degrees==right.calculator_degrees && left.prefixes==right.prefixes && left.aliases==right.aliases;
+        left.everything_prefix_only==right.everything_prefix_only && left.everything_prefix==right.everything_prefix && left.automatic_updates==right.automatic_updates && left.search_conversions==right.search_conversions && left.search_aliases==right.search_aliases && left.search_currency==right.search_currency && left.calculator_degrees==right.calculator_degrees && left.prefixes==right.prefixes && left.aliases==right.aliases;
 }
 
 template <typename T>
@@ -157,6 +157,7 @@ void test_save_applies_toggles_and_win_r() {
         child<QCheckBox>(dialog,"automaticUpdates")->setChecked(false);
         child<QCheckBox>(dialog,"searchConversions")->setChecked(false);
         child<QCheckBox>(dialog,"searchAliases")->setChecked(false);
+        child<QCheckBox>(dialog,"searchCurrency")->setChecked(false);
         child<QCheckBox>(dialog,"calculatorDegrees")->setChecked(true);
         child<QCheckBox>(dialog,"everythingPrefixOnly")->setChecked(true);
         child<QLineEdit>(dialog,"everythingPrefix")->setText("");
@@ -189,7 +190,7 @@ void test_save_applies_toggles_and_win_r() {
     require(!value.search_apps && !value.search_calculator && !value.search_settings && !value.search_paths && value.search_everything,"Save applies each source toggle");
     require(value.everything_prefix_only && value.everything_prefix==L"ef","Save applies Everything prefix options");
     require(!value.automatic_updates,"Save applies automatic update preference");
-    require(!value.search_conversions && !value.search_aliases && value.calculator_degrees,"Save applies new module and angle settings");
+    require(!value.search_conversions && !value.search_aliases && !value.search_currency && value.calculator_degrees,"Save applies new module and angle settings");
     require(value.extra_bindings.size() == 1 && value.extra_bindings.front() == palette::Hotkey{MOD_WIN, 'R'},
         "Save applies recorded Win+R binding");
 }

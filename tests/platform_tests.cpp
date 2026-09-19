@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     desired.search_apps=false;desired.search_calculator=false;desired.search_settings=false;desired.search_paths=false;desired.search_everything=true;
     desired.everything_prefix_only=true;desired.everything_prefix=L"ef";
     desired.automatic_updates=false;
-    desired.search_conversions=false;desired.search_aliases=false;desired.calculator_degrees=true;
+    desired.search_conversions=false;desired.search_aliases=false;desired.search_currency=false;desired.calculator_degrees=true;
     desired.aliases={{L"work",L"C:\\Projects",L""},{L"edit",L"notepad.exe",L"\"my notes.txt\""}};
     set_module_rule(desired,Module::apps,{L"launch",true});
     desired.portable_apps={L"C:\\Program Files\\Example\\example.exe", L"C:\\Portable\\éditeur.exe"};
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
     check(actual.extra_bindings==desired.extra_bindings, "multiple keybindings roundtrip");
     check(actual.aliases==desired.aliases,"aliases including empty arguments roundtrip");
     check(actual.prefixes==desired.prefixes,"module prefixes roundtrip");
-    check(!actual.search_conversions && !actual.search_aliases && actual.calculator_degrees,"new module and angle preferences roundtrip");
+    check(!actual.search_conversions && !actual.search_aliases && !actual.search_currency && actual.calculator_degrees,"new module and angle preferences roundtrip");
     check(!actual.search_apps && !actual.search_calculator && !actual.search_settings && !actual.search_paths && actual.search_everything,"independent source toggles roundtrip");
     check(actual.everything_prefix_only && actual.everything_prefix==L"ef","Everything prefix options roundtrip");
     check(defaults.automatic_updates && !actual.automatic_updates,"automatic update preference persists");
@@ -100,6 +100,12 @@ int main(int argc, char** argv) {
     check(migrated.everything_prefix==L"app" && migrated.everything_prefix_only && module_rule(migrated,Module::apps).prefix!=L"app","legacy Everything prefix survives new defaults");
     migrated.everything_prefix.clear();migrated.everything_prefix_only=false;
     check(save_settings(migrated,error,legacy_path.c_str()) && load_settings(legacy_path.c_str()).everything_prefix.empty(),"optional Everything prefix can be cleared");
+    RegOpenKeyExW(HKEY_CURRENT_USER,legacy_path.c_str(),0,KEY_SET_VALUE,&legacy_key);
+    const wchar_t existing_fx[]=L"fx";
+    RegSetValueExW(legacy_key,L"AppsPrefix",0,REG_SZ,reinterpret_cast<const BYTE*>(existing_fx),sizeof(existing_fx));
+    RegDeleteValueW(legacy_key,L"CurrencyPrefix");RegCloseKey(legacy_key);
+    migrated=load_settings(legacy_path.c_str());
+    check(module_rule(migrated,Module::apps).prefix==L"fx" && module_rule(migrated,Module::currency).prefix==L"fx:","new currency default preserves existing custom prefixes");
     RegDeleteTreeW(HKEY_CURRENT_USER,legacy_path.c_str());
     check(!valid_everything_prefix(L"") && !valid_everything_prefix(L"a b") && !valid_everything_prefix(L"="),"invalid prefixes rejected");
     check(!valid_hotkey(0,'A') && !valid_hotkey(MOD_CONTROL,VK_F12) && !valid_hotkey(MOD_WIN,'L'), "reject unmodified and reserved combinations");

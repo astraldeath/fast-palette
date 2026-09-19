@@ -16,9 +16,11 @@ Download `FastPalette.exe` from [Releases](https://github.com/astraldeath/fast-p
 - Enable **Everything** to search its index while Everything is running. Its prefix (default `? `) shows only Everything results. Enable **Only with prefix** to exclude it from ordinary searches. Everything syntax passes through unchanged, including `ext:pdf`, `size:>1mb`, wildcards, Boolean operators, and `regex:`.
 - Configured Windows shortcuts replace their normal action while the app runs. Other shortcuts pass through. Windows security shortcuts remain reserved.
 
-Calculator examples: `2pi`, `2(3+4)`, `sqrt(81)`, `2^10`, `100!`, `sin(pi/2)`. Supports `+ - * / ^ % !`, parentheses, `pi`, `e`, `sqrt`, `abs`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `ln`, `log`/`log10`, `round`, `floor`, `ceil`, and `trunc`. Factorials accept 0–170; large results use scientific notation. Angles use radians unless degrees are enabled in Search settings. `10%` means `0.1`; `log` is base 10. The default calculator prefix is `=`.
+Calculator examples: `2pi`, `2(3+4)`, `sqrt(81)`, `2^10`, `100!`, `sin(pi/2)`. Supports `+ - * / ^ % !`, parentheses, `pi`, `e`, `sqrt`, `abs`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `ln`, `log`/`log10`, `round`, `floor`, `ceil`, and `trunc`. Factorials accept 0–170; results use system number separators and expand scientific notation. Angles use radians unless degrees are enabled in Search settings. `10%` means `0.1`; `log` is base 10. The default calculator prefix is `=`.
 
 Convert length, weight, temperature, time, storage, or transfer rates: `180cm to ftin`, `5'11" to cm`, `74in to ftin`, `2gb to mb`, `2 GiB to MiB`, `72f to c`. `ftin` means feet and inches. Storage shorthand `gb`/`mb` means decimal bytes; `GiB`/`MiB` uses 1024. Speeds respect case: `2 MB/s` or `2 MBps` gives `16 Mbps`; `2 mbps` or `2 mb/s` gives `0.25 MB/s`.
+
+Convert fiat or crypto: `usd to yen`, `100 usd to won`, `5 btc to usd`, or `5 btc to xmr`. Omit the amount for 1. The Currency module uses keyless [daily exchange rates](https://github.com/fawazahmed0/exchange-api), shows their date, and caches them for up to seven days offline. Its default prefix is `fx`.
 
 Settings are stored in `HKCU\Software\FastPalette`. After moving the executable, run it once to update launch at sign-in. Use the tray menu to exit.
 
