@@ -91,7 +91,7 @@ PaletteWindow::~PaletteWindow() {
     if(keyboard_)keyboard_->stop();
     ++source_generation_;source_worker_.stop();
     worker_.stop();
-    if(shell_notify_)SHChangeNotifyDeregister(shell_notify_);
+    for(auto registration:shell_notifications_)SHChangeNotifyDeregister(registration);
     if(host_){WTSUnRegisterSessionNotification(host_);unregister_bindings();DestroyWindow(host_);}
     for(auto& [id,icon]:pending_icons_)if(icon)DestroyIcon(icon);
 }
@@ -139,9 +139,15 @@ bool PaletteWindow::create(HINSTANCE instance,bool background) {
     std::array<PIDLIST_ABSOLUTE,3> pidls{};
     SHGetKnownFolderIDList(FOLDERID_Programs,0,nullptr,&pidls[0]);SHGetKnownFolderIDList(FOLDERID_CommonPrograms,0,nullptr,&pidls[1]);
     SHGetKnownFolderIDList(FOLDERID_AppsFolder,0,nullptr,&pidls[2]);
-    std::vector<SHChangeNotifyEntry> watches;for(auto pidl:pidls)if(pidl)watches.push_back({pidl,TRUE});
-    if(!watches.empty())shell_notify_=SHChangeNotifyRegister(host_,SHCNRF_ShellLevel|SHCNRF_NewDelivery,
-        SHCNE_CREATE|SHCNE_DELETE|SHCNE_RENAMEITEM|SHCNE_UPDATEDIR|SHCNE_UPDATEITEM|SHCNE_ASSOCCHANGED,msg_shell,static_cast<int>(watches.size()),watches.data());
+    for(size_t i=0;i<pidls.size();++i)if(pidls[i]){
+        const SHChangeNotifyEntry watch{pidls[i],TRUE};
+        const int sources=SHCNRF_ShellLevel|SHCNRF_NewDelivery|
+            (i<2?SHCNRF_InterruptLevel|SHCNRF_RecursiveInterrupt:0);
+        const auto registration=SHChangeNotifyRegister(host_,sources,
+            SHCNE_CREATE|SHCNE_DELETE|SHCNE_RENAMEITEM|SHCNE_MKDIR|SHCNE_RMDIR|SHCNE_RENAMEFOLDER|
+            SHCNE_UPDATEDIR|SHCNE_UPDATEITEM|SHCNE_ASSOCCHANGED,msg_shell,1,&watch);
+        if(registration)shell_notifications_.push_back(registration);
+    }
     for(auto pidl:pidls)CoTaskMemFree(pidl);
     request_catalog();update_results();
     // Pay style/layout/font initialization once while hidden. Reopening reuses it.
@@ -162,6 +168,8 @@ void PaletteWindow::show() {
     const auto work=target->availableGeometry();
     move(work.left()+std::max(0,(work.width()-width())/2),std::clamp(work.top()+work.height()/5,work.top(),std::max(work.top(),work.bottom()-height()-12)));
     QWidget::show();raise();activateWindow();SetForegroundWindow(handle());edit_->setFocus(Qt::ShortcutFocusReason);
+    // Recover missed installer notifications without blocking palette opening.
+    if(!loading_ && (!catalog_age_.isValid() || catalog_age_.hasExpired(30000)))request_catalog();
 }
 void PaletteWindow::dismiss(bool restore) {
     hide();if(restore && previous_ && IsWindow(previous_))SetForegroundWindow(previous_);
@@ -395,7 +403,7 @@ LRESULT PaletteWindow::message(UINT message,WPARAM w,LPARAM l) {
     case WM_POWERBROADCAST:if(keyboard_ && w==PBT_APMRESUMEAUTOMATIC && !settings_open_){keyboard_->stop();keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));}return TRUE;
     case msg_catalog:{
         {std::lock_guard lock(inbox_mutex_);if(pending_apps_){apps_=std::move(*pending_apps_);pending_apps_.reset();}}
-        loading_=false;update_results(true);if(refresh_again_){refresh_again_=false;request_catalog();}return 0;}
+        loading_=false;catalog_age_.start();update_results(true);if(refresh_again_){refresh_again_=false;request_catalog();}return 0;}
     case msg_icons:{
         std::vector<std::pair<std::wstring,HICON>> incoming;{std::lock_guard lock(inbox_mutex_);incoming.swap(pending_icons_);}
         for(auto& [id,icon]:incoming)if(icon){icons_.insert(qs(id),QIcon(QPixmap::fromImage(QImage::fromHICON(icon))));DestroyIcon(icon);}update_icons();return 0;}
@@ -403,7 +411,7 @@ LRESULT PaletteWindow::message(UINT message,WPARAM w,LPARAM l) {
         std::optional<LaunchReply> reply;{std::lock_guard lock(inbox_mutex_);reply=std::move(pending_launch_);pending_launch_.reset();}launching_=false;
         if(reply && reply->ok){for(auto& app:apps_)if(app.id==reply->id){app.use_count=std::min(app.use_count+1,1000000u);app.last_used=static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());const auto updated=app;worker_.enqueue([updated](std::stop_token){save_usage(updated);});break;}set_notice({});dismiss();}
         else if(reply){show();set_notice("Could not open: "+qs(reply->error));}return 0;}
-    case msg_shell:{PIDLIST_ABSOLUTE* changed=nullptr;LONG event=0;const auto lock=SHChangeNotification_Lock(reinterpret_cast<HANDLE>(w),static_cast<DWORD>(l),&changed,&event);if(lock)SHChangeNotification_Unlock(lock);refresh_timer_->start();return 0;}
+    case msg_shell:{PIDLIST_ABSOLUTE* changed=nullptr;LONG event=0;const auto lock=SHChangeNotification_Lock(reinterpret_cast<HANDLE>(w),static_cast<DWORD>(l),&changed,&event);if(lock)SHChangeNotification_Unlock(lock);if(!refresh_timer_->isActive())refresh_timer_->start();return 0;}
     }
     return DefWindowProcW(host_,message,w,l);
 }

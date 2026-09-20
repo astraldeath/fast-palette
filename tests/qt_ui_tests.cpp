@@ -3,6 +3,9 @@
 #include "providers.hpp"
 #include "number_format.hpp"
 #include <QApplication>
+#include <QTemporaryDir>
+#include <QFile>
+#include <shlobj.h>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QTest>
@@ -102,6 +105,27 @@ int main(int argc,char** argv) {
         }
         window.grab().save(QCoreApplication::applicationDirPath()+"/../currency-preview.png");
     }
+    if(application.arguments().contains("--catalog-live")){
+        PWSTR programs=nullptr;
+        check(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Programs,0,nullptr,&programs)),"Start menu path available");
+        if(programs){
+            QTemporaryDir folder(QString::fromWCharArray(programs)+"/FastPalette-test-XXXXXX");CoTaskMemFree(programs);
+            check(folder.isValid(),"isolated Start menu fixture created");
+            if(folder.isValid()){
+                const QString name="FastPaletteCatalogProbe";
+                const auto path=folder.filePath(name+".url");QFile shortcut(path);
+                check(shortcut.open(QIODevice::WriteOnly),"new application shortcut created");
+                shortcut.write("[InternetShortcut]\r\nURL=https://example.invalid/\r\n");shortcut.close();
+                input->setText(name);QElapsedTimer wait;wait.start();
+                auto found=[&]{for(int i=0;i<results->count();++i)if(results->item(i)->data(Qt::UserRole).toString()==name)return true;return false;};
+                while(wait.elapsed()<20000 && !found())QTest::qWait(50);
+                check(found(),"new nested Start menu app discovered without manual refresh");
+                check(QFile::remove(path),"fixture shortcut removed");wait.restart();
+                while(wait.elapsed()<20000 && found())QTest::qWait(50);
+                check(!found(),"removed app disappears without manual refresh");
+            }
+        }
+    }
     bool settings_opened=false;
     auto* settings=window.findChild<QToolButton*>("settingsButton");
     input->setText("bluetooth");
@@ -112,7 +136,7 @@ int main(int argc,char** argv) {
     const auto appdata=QString::fromStdWString(palette::expand_path_query(L"%appdata%"));
     while(path_wait.elapsed()<2000 && !results->item(0)->toolTip().contains(appdata))QTest::qWait(20);
     check(results->item(0)->toolTip().contains(appdata),"current environment path wins over superseded query");
-    if(argc>1 && !application.arguments().contains("--currency-live")){input->setText("? Everything.exe");QElapsedTimer files_wait;files_wait.start();
+    if(argc>1 && !application.arguments().contains("--currency-live") && !application.arguments().contains("--catalog-live")){input->setText("? Everything.exe");QElapsedTimer files_wait;files_wait.start();
         while(files_wait.elapsed()<2000 && !results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive))QTest::qWait(20);
         check(results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive),"Everything results reach the palette");
         window.grab().save(QCoreApplication::applicationDirPath()+"/../everything-preview.png");}

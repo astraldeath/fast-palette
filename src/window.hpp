@@ -5,6 +5,7 @@
 #include "settings.hpp"
 #include "worker.hpp"
 #include <QWidget>
+#include <QElapsedTimer>
 #include <QIcon>
 #include <QHash>
 #include <optional>
@@ -67,7 +68,8 @@ private:
     QTimer* source_timer_=nullptr;
     QTimer* currency_timer_=nullptr;
     UINT registered_invoke_=0;
-    ULONG shell_notify_=0;
+    std::vector<ULONG> shell_notifications_;
+    QElapsedTimer catalog_age_;
     bool loading_=false,refresh_again_=false,launching_=false,settings_open_=false,hotkey_registered_=false;
     bool actions_open_=false;
     Settings settings_;
