@@ -106,6 +106,34 @@ std::wstring shortcut_identity(const std::wstring& path,std::wstring* command) {
     if(command)*command=identity;
     return identity+L"|"+fold(directory);
 }
+namespace detail {
+std::wstring installed_app_executable(std::wstring_view name,std::wstring_view location,std::wstring_view icon) {
+    const auto display=fold(name);
+    auto matches=[&](const std::filesystem::path& path){
+        const auto stem=fold(path.stem().native());
+        if(stem.empty() || stem.find(L"uninst")!=stem.npos || stem==L"setup" || stem==L"update" || stem==L"updater")return false;
+        if(display==stem)return true;
+        if(!display.starts_with(stem+L" "))return false;
+        auto version=display.substr(stem.size()+1);if(version.starts_with(L"v"))version.erase(0,1);
+        return !version.empty() && version[0]>=L'0' && version[0]<=L'9';
+    };
+    auto clean=[](std::wstring text){
+        if(!text.empty() && text.front()==L'"'){const auto end=text.find(L'"',1);if(end==text.npos)return std::wstring{};text=text.substr(1,end-1);}
+        else {const auto comma=text.rfind(L',');if(comma!=text.npos){const auto suffix=text.substr(comma+1);if(!suffix.empty() && suffix.find_first_not_of(L"-0123456789")==suffix.npos)text.resize(comma);}}
+        return expanded_path(text);
+    };
+    const std::filesystem::path icon_path(clean(std::wstring(icon))),install_path(clean(std::wstring(location)));
+    const auto usable=[&](const std::filesystem::path& path){std::error_code ec;return path.is_absolute() && !path.native().starts_with(L"\\\\") && fold(path.extension().native())==L".exe" && matches(path) && std::filesystem::is_regular_file(path,ec);};
+    if(usable(icon_path))return icon_path.native();
+    for(const auto& directory:{install_path,icon_path.parent_path()}){
+        if(!directory.is_absolute() || directory.native().starts_with(L"\\\\"))continue;
+        // Only inspect immediate executables in a registered install directory.
+        std::error_code ec;std::filesystem::directory_iterator it(directory,std::filesystem::directory_options::skip_permission_denied,ec),end;
+        size_t count=0;for(;it!=end && count++<256;it.increment(ec)){if(ec)break;if(usable(it->path()))return it->path().native();}
+    }
+    return {};
+}
+}
 std::vector<AppEntry> discover_apps(std::stop_token stop) {
     ComApartment apartment;
     std::vector<AppEntry> apps;
@@ -172,6 +200,24 @@ std::vector<AppEntry> discover_apps(std::stop_token stop) {
                 }
                 CoTaskMemFree(child); child=nullptr;
             }
+        }
+    }
+    for(auto hive:{HKEY_CURRENT_USER,HKEY_LOCAL_MACHINE})for(auto view:{KEY_WOW64_64KEY,KEY_WOW64_32KEY}){
+        RegistryKey root;
+        if(RegOpenKeyExW(hive,L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",0,KEY_READ|view,&root.value)!=ERROR_SUCCESS)continue;
+        for(DWORD index=0;index<10000 && !stop.stop_requested();++index){
+            wchar_t child[256]{};DWORD length=256;const auto status=RegEnumKeyExW(root.value,index,child,&length,nullptr,nullptr,nullptr,nullptr);
+            if(status==ERROR_NO_MORE_ITEMS)break;if(status!=ERROR_SUCCESS)continue;
+            RegistryKey key;if(RegOpenKeyExW(root.value,child,0,KEY_READ|view,&key.value)!=ERROR_SUCCESS)continue;
+            auto read=[&](const wchar_t* field){wchar_t text[32768]{};DWORD bytes=sizeof(text);
+                return RegGetValueW(key.value,nullptr,field,RRF_RT_REG_SZ|RRF_RT_REG_EXPAND_SZ,nullptr,text,&bytes)==ERROR_SUCCESS?std::wstring(text):std::wstring{};};
+            DWORD system=0,bytes=sizeof(system);RegGetValueW(key.value,nullptr,L"SystemComponent",RRF_RT_REG_DWORD,nullptr,&system,&bytes);
+            if(system || !read(L"ParentKeyName").empty())continue;
+            const auto name=read(L"DisplayName");if(name.empty())continue;
+            const auto path=detail::installed_app_executable(name,read(L"InstallLocation"),read(L"DisplayIcon"));if(path.empty())continue;
+            const auto command=command_identity(path,L"");if(!desktop_commands.insert(command).second)continue;
+            AppEntry app;app.name=std::filesystem::path(path).stem().native();app.target=path;app.id=command;
+            app.kind=LaunchKind::executable;app.detail=L"Application";add(std::move(app));
         }
     }
     for (const auto& path:load_settings().portable_apps) {

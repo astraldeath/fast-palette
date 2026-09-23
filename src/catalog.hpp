@@ -5,6 +5,7 @@
 #include <string_view>
 namespace palette {
 namespace detail {
+std::wstring installed_app_executable(std::wstring_view name,std::wstring_view location,std::wstring_view icon);
 bool path_is_within_directory(std::wstring_view path, std::wstring_view directory);
 }
 std::vector<AppEntry> discover_apps(std::stop_token stop = {});

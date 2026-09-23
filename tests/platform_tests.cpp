@@ -120,6 +120,18 @@ int main(int argc, char** argv) {
     CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
     const auto temp=std::filesystem::temp_directory_path()/(L"FastPaletteTest-"+std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(temp);
+    {
+        const auto executable=temp/L"Ledger Wallet.exe",icon=temp/L"uninstallerIcon.ico",uninstaller=temp/L"Uninstall Ledger Wallet.exe";
+        std::ofstream(executable).put('x');std::ofstream(uninstaller).put('x');
+        check(detail::installed_app_executable(L"Ledger Wallet 4.19.1",L"",icon.native())==executable.native(),"registered icon directory discovers app without shortcuts");
+        check(detail::installed_app_executable(L"Ledger Wallet",temp.native(),L"")==executable.native(),"registered install location fallback");
+        check(detail::installed_app_executable(L"Ledger Wallet",L"",L"\""+executable.native()+L"\",0")==executable.native(),"quoted executable icon with resource index");
+        check(detail::installed_app_executable(L"Unrelated App",temp.native(),icon.native()).empty(),"unrelated executables excluded");
+        std::filesystem::remove(executable);
+        check(detail::installed_app_executable(L"Ledger Wallet",temp.native(),uninstaller.native()).empty(),"never use uninstaller as launch target");
+        std::filesystem::remove(uninstaller);
+    }
+
     auto make_link=[&](const wchar_t* name,const wchar_t* args) {
         Microsoft::WRL::ComPtr<IShellLinkW> link;
         HRESULT hr=CoCreateInstance(CLSID_ShellLink,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&link));
