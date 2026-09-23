@@ -136,7 +136,7 @@ int main(int argc,char** argv) {
     const auto appdata=QString::fromStdWString(palette::expand_path_query(L"%appdata%"));
     while(path_wait.elapsed()<2000 && !results->item(0)->toolTip().contains(appdata))QTest::qWait(20);
     check(results->item(0)->toolTip().contains(appdata),"current environment path wins over superseded query");
-    if(argc>1 && !application.arguments().contains("--currency-live") && !application.arguments().contains("--catalog-live")){input->setText("? Everything.exe");QElapsedTimer files_wait;files_wait.start();
+    if(argc>1 && !application.arguments().contains("--currency-live") && !application.arguments().contains("--catalog-live") && !application.arguments().contains("--taskbar-live")){input->setText("? Everything.exe");QElapsedTimer files_wait;files_wait.start();
         while(files_wait.elapsed()<2000 && !results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive))QTest::qWait(20);
         check(results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive),"Everything results reach the palette");
         window.grab().save(QCoreApplication::applicationDirPath()+"/../everything-preview.png");}
@@ -148,6 +148,26 @@ int main(int argc,char** argv) {
     QTest::keyClick(settings,Qt::Key_Return);
     check(settings_opened,"Enter activates focused Settings button");
     window.hide();
+    if(application.arguments().contains("--taskbar-live")){
+        HWND host=nullptr;
+        EnumThreadWindows(GetCurrentThreadId(),[](HWND candidate,LPARAM context)->BOOL{
+            wchar_t name[128]{};GetClassNameW(candidate,name,128);
+            if(std::wstring_view(name)==palette::window_class){*reinterpret_cast<HWND*>(context)=candidate;return FALSE;}return TRUE;
+        },reinterpret_cast<LPARAM>(&host));
+        check(host!=nullptr,"own message host found");
+        QWidget fullscreen(nullptr,Qt::Window|Qt::FramelessWindowHint);fullscreen.showFullScreen();
+        fullscreen.activateWindow();SetForegroundWindow(reinterpret_cast<HWND>(fullscreen.winId()));QTest::qWait(500);
+        const auto taskbar=FindWindowW(L"Shell_TrayWnd",nullptr);
+        const auto initial=GetWindowLongPtrW(taskbar,GWL_EXSTYLE)&WS_EX_TOPMOST;
+        for(auto key:{VK_LWIN,VK_RWIN}){
+            SendMessageW(host,palette::msg_invoke,key,0);QTest::qWait(300);
+            check(window.isVisible() && input->hasFocus(),"bare Win keeps palette typing focus");
+            check((GetWindowLongPtrW(taskbar,GWL_EXSTYLE)&WS_EX_TOPMOST)!=0,"bare Win raises taskbar over fullscreen window");
+            QTest::keyClick(input,Qt::Key_Escape);QTest::qWait(300);
+            check((GetWindowLongPtrW(taskbar,GWL_EXSTYLE)&WS_EX_TOPMOST)==initial,"dismiss restores taskbar topmost state");
+        }
+        fullscreen.close();
+    }
     palette::Settings disabled;disabled.search_apps=false;disabled.search_calculator=false;
     disabled.search_settings=false;disabled.search_paths=false;disabled.search_everything=false;disabled.search_conversions=false;disabled.search_aliases=false;disabled.search_currency=false;disabled.automatic_updates=false;
     palette::PaletteWindow disabled_window(disabled);

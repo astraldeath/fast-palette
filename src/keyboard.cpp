@@ -271,12 +271,12 @@ struct KeyboardHook::Impl {
                                                          preexisting_chord, live_modifiers);
                 if (decision.mask_release) {
                     if (active->inject_masked_release(event->vkCode)) {
-                        if (decision.invoke) PostMessageW(active->target, active->message, 0, 0);
+                        if (decision.invoke) PostMessageW(active->target, active->message, decision.mask_release ? event->vkCode : 0, 0);
                         return 1;
                     }
                     return CallNextHookEx(nullptr, code, w_param, l_param);
                 }
-                if (decision.invoke) PostMessageW(active->target, active->message, 0, 0);
+                if (decision.invoke) PostMessageW(active->target, active->message, decision.mask_release ? event->vkCode : 0, 0);
                 if (decision.suppress) return 1;
             }
         }

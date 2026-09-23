@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 namespace palette {
-// Owns a dedicated message-loop thread. Posts message for a bare Win tap or intercepted Win hotkey.
+// Posts message with wParam=VK_LWIN/VK_RWIN for bare taps, or 0 for Win hotkeys.
 class KeyboardHook {
 public:
     KeyboardHook(HWND target, UINT message);

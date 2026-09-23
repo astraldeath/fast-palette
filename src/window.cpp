@@ -86,6 +86,7 @@ PaletteWindow::PaletteWindow(Settings settings):QWidget(nullptr,Qt::Tool|Qt::Fra
     set_notice({});
 }
 PaletteWindow::~PaletteWindow() {
+    restore_taskbar();
     currency_.reset();
     updater_.reset();
     if(keyboard_)keyboard_->stop();
@@ -171,11 +172,36 @@ void PaletteWindow::show() {
     // Recover missed installer notifications without blocking palette opening.
     if(!loading_ && (!catalog_age_.isValid() || catalog_age_.hasExpired(30000)))request_catalog();
 }
+void PaletteWindow::reveal_taskbar() {
+    if(!raised_taskbars_.empty())return;
+    const auto monitor=MonitorFromWindow(handle(),MONITOR_DEFAULTTONEAREST);
+    const auto raise=[&](HWND taskbar){
+        if(!taskbar || MonitorFromWindow(taskbar,MONITOR_DEFAULTTONEAREST)!=monitor)return;
+        DWORD process=0;GetWindowThreadProcessId(taskbar,&process);
+        const bool topmost=(GetWindowLongPtrW(taskbar,GWL_EXSTYLE)&WS_EX_TOPMOST)!=0;
+        // Preserve Explorer's geometry and focus; only raise its existing taskbar.
+        if(SetWindowPos(taskbar,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_ASYNCWINDOWPOS))
+            raised_taskbars_.push_back({taskbar,process,topmost});
+    };
+    raise(FindWindowW(L"Shell_TrayWnd",nullptr));
+    HWND secondary=nullptr;
+    while((secondary=FindWindowExW(nullptr,secondary,L"Shell_SecondaryTrayWnd",nullptr)))raise(secondary);
+}
+void PaletteWindow::restore_taskbar() {
+    for(const auto& taskbar:raised_taskbars_){
+        DWORD process=0;GetWindowThreadProcessId(taskbar.window,&process);
+        if(process!=taskbar.process || !IsWindow(taskbar.window))continue;
+        if(!taskbar.topmost)SetWindowPos(taskbar.window,HWND_NOTOPMOST,0,0,0,0,
+            SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_ASYNCWINDOWPOS);
+    }
+    raised_taskbars_.clear();
+}
 void PaletteWindow::dismiss(bool restore) {
     hide();if(restore && previous_ && IsWindow(previous_))SetForegroundWindow(previous_);
 }
 void PaletteWindow::closeEvent(QCloseEvent* event){event->ignore();dismiss(true);}
 bool PaletteWindow::event(QEvent* event) {
+    if(event->type()==QEvent::Hide)restore_taskbar();
     if(event->type()==QEvent::WindowDeactivate && !settings_open_ && !actions_open_ && isVisible())dismiss();
     return QWidget::event(event);
 }
@@ -394,7 +420,10 @@ LRESULT PaletteWindow::message(UINT message,WPARAM w,LPARAM l) {
     case msg_sources:{
         std::optional<SourceReply> reply;{std::lock_guard lock(inbox_mutex_);reply=std::move(pending_sources_);pending_sources_.reset();}
         if(reply && reply->generation==source_generation_.load()){source_results_=std::move(reply->entries);everything_available_=reply->everything_available;sources_pending_=false;update_results(true);}return 0;}
-    case msg_invoke:case WM_HOTKEY:if(isVisible()&&!settings_open_)dismiss(true);else show();return 0;
+    case msg_invoke:case WM_HOTKEY:
+        if(isVisible()&&!settings_open_)dismiss(true);
+        else {show();if(message==msg_invoke && (w==VK_LWIN || w==VK_RWIN) && isVisible())reveal_taskbar();}
+        return 0;
     case msg_exit:qApp->quit();return 0;
     case WM_SETTINGCHANGE:apply_ui_theme();update_results(true);return 0;
     case WM_WTSSESSION_CHANGE:

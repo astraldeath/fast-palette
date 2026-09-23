@@ -44,6 +44,8 @@ private:
     void copy_result_path();
     void show_actions(const QPoint& point);
     void dismiss(bool restore=false);
+    void reveal_taskbar();
+    void restore_taskbar();
     void request_catalog();
     void request_icons();
     void schedule_sources();
@@ -58,6 +60,8 @@ private:
     struct SourceReply { std::uint64_t generation; std::vector<AppEntry> entries; bool everything_available=true; };
     struct LaunchReply { bool ok; std::wstring id,error; };
     HWND host_=nullptr,previous_=nullptr;
+    struct RaisedTaskbar { HWND window; DWORD process; bool topmost; };
+    std::vector<RaisedTaskbar> raised_taskbars_;
     QLineEdit* edit_=nullptr;
     QListWidget* list_=nullptr;
     QLabel* footer_=nullptr;
