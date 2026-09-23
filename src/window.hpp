@@ -7,6 +7,7 @@
 #include <QWidget>
 #include <QElapsedTimer>
 #include <QIcon>
+#include <QImage>
 #include <QHash>
 #include <optional>
 #include <unordered_set>
@@ -23,7 +24,7 @@ class CurrencyService;
 inline constexpr wchar_t window_class[]=L"FastPalette.Window";
 inline constexpr wchar_t invoke_message[]=L"FastPalette.Invoke.1";
 inline constexpr UINT msg_invoke=WM_APP+1,msg_catalog=WM_APP+2,msg_icons=WM_APP+3,
-    msg_launch=WM_APP+4,msg_exit=WM_APP+5,msg_shell=WM_APP+7,msg_sources=WM_APP+8;
+    msg_launch=WM_APP+4,msg_exit=WM_APP+5,msg_cached_catalog=WM_APP+6,msg_shell=WM_APP+7,msg_sources=WM_APP+8;
 class PaletteWindow final : public QWidget {
 public:
     explicit PaletteWindow(Settings settings=load_settings());
@@ -39,7 +40,7 @@ private:
     static LRESULT CALLBACK window_proc(HWND,UINT,WPARAM,LPARAM);
     LRESULT message(UINT,WPARAM,LPARAM);
     void update_results(bool preserve=false);
-    void update_icons();
+    void update_icons(const std::wstring* changed=nullptr);
     void activate(ResultAction action=ResultAction::open);
     void copy_result_path();
     void show_actions(const QPoint& point);
@@ -83,6 +84,16 @@ private:
     std::unique_ptr<CurrencyService> currency_;
     Worker worker_;
     Worker source_worker_;
+    Worker catalog_worker_;
+    Worker icon_worker_;
+    QString cache_directory_;
+    bool catalog_cache_loaded_=false;
+    std::uint64_t catalog_generation_=0;
+    std::atomic<std::uint64_t> icon_generation_{0};
+    std::vector<std::wstring> icon_plan_;
+    std::vector<AppEntry> warm_apps_;
+    QHash<QString,qint64> icon_retry_after_;
+    std::unordered_set<std::wstring> validate_icons_;
     std::atomic<std::uint64_t> source_generation_{0};
     std::vector<AppEntry> source_results_;
     bool sources_pending_=false,everything_available_=true;
@@ -91,10 +102,12 @@ private:
     std::vector<Row> rows_;
     std::wstring query_;
     QHash<QString,QIcon> icons_;
-    std::unordered_set<std::wstring> requested_icons_;
+
     std::mutex inbox_mutex_;
     std::optional<std::vector<AppEntry>> pending_apps_;
-    std::vector<std::pair<std::wstring,HICON>> pending_icons_;
+    std::optional<std::vector<AppEntry>> pending_cached_apps_;
+    struct IconReply { std::wstring id; QImage image; std::uint64_t catalog; };
+    std::vector<IconReply> pending_icons_;
     std::optional<LaunchReply> pending_launch_;
     std::optional<SourceReply> pending_sources_;
 };

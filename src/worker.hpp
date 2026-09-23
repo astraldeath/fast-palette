@@ -25,6 +25,10 @@ public:
         { std::lock_guard lock(mutex_); if(priority) jobs_.push_front(std::move(job)); else jobs_.push_back(std::move(job)); }
         ready_.notify_one();
     }
+    void replace_pending(Job job) {
+        { std::lock_guard lock(mutex_);jobs_.clear();jobs_.push_back(std::move(job)); }
+        ready_.notify_one();
+    }
     void stop() { thread_.request_stop(); ready_.notify_all(); if(thread_.joinable()) thread_.join(); }
 private:
     std::mutex mutex_;

@@ -4,7 +4,7 @@ A Windows 11 launcher, calculator, and search palette built with C++ and Qt Widg
 
 ## Use
 
-Download `FastPalette.exe` from [Releases](https://github.com/astraldeath/fast-palette/releases/latest) and run it. The app stays in the system tray.
+Download `FastPalette.exe` from [Releases](https://github.com/astraldeath/fast-palette/releases/latest) and run it. The app stays in the system tray. App listings and icons are cached locally, with icons for frequently used apps preloaded and changes indexed in the background.
 
 - Tap a Windows key or press **Ctrl+Alt+Space** to open.
 - Type to search or calculate. **Enter** launches or copies; **Escape** closes.

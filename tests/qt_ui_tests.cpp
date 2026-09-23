@@ -36,7 +36,9 @@ int main(int argc,char** argv) {
     input->setText("2+3*4");
     check(results->count()>0 && results->item(0)->data(Qt::UserRole).toString()=="14","calculator result in framework list");
     check(results->item(0)->toolTip()=="14\nEnter to copy","full result tooltip belongs to hit-tested list item");
+    auto* first_row=results->itemWidget(results->item(0));
     input->setText("180cm to ftin");
+    check(results->itemWidget(results->item(0))==first_row,"result widget reused while typing");
     check(results->item(0)->data(Qt::UserRole).toString()==palette::localized_number_result("5 ft 10.87 in"),"conversion appears in palette");
     input->setText("conv 2MBps to Mbps");
     check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="16 Mbps","conversion prefix isolates rate conversion");

@@ -1,5 +1,7 @@
 #include "window.hpp"
 #include "catalog.hpp"
+#include "app_cache.hpp"
+#include <QDateTime>
 #include "providers.hpp"
 #include "modules.hpp"
 #include "conversions.hpp"
@@ -33,6 +35,7 @@
 #include <shlobj.h>
 #include <wtsapi32.h>
 #include <algorithm>
+#include <filesystem>
 #include <array>
 #include <chrono>
 
@@ -91,10 +94,10 @@ PaletteWindow::~PaletteWindow() {
     updater_.reset();
     if(keyboard_)keyboard_->stop();
     ++source_generation_;source_worker_.stop();
-    worker_.stop();
+    ++icon_generation_;icon_worker_.stop();catalog_worker_.stop();worker_.stop();
     for(auto registration:shell_notifications_)SHChangeNotifyDeregister(registration);
     if(host_){WTSUnRegisterSessionNotification(host_);unregister_bindings();DestroyWindow(host_);}
-    for(auto& [id,icon]:pending_icons_)if(icon)DestroyIcon(icon);
+
 }
 bool PaletteWindow::create(HINSTANCE instance,bool background) {
     registered_invoke_=RegisterWindowMessageW(invoke_message);
@@ -270,22 +273,29 @@ void PaletteWindow::update_results(bool preserve) {
         const bool empty_files=files_only && first==std::wstring::npos;
         rows_.push_back({empty_files?L"Type a filename":missing?L"Open Everything to search files":waiting?L"Searching...":L"No results",{}, {},false,L"empty"});
     }
-    list_->setUpdatesEnabled(false);list_->clear();int selected=0;
+    list_->setUpdatesEnabled(false);int selected=0;
+    while(list_->count()>static_cast<int>(rows_.size()))delete list_->takeItem(list_->count()-1);
     for(size_t i=0;i<rows_.size();++i) {
-        const auto& row=rows_[i];auto* item=new QListWidgetItem(list_);
-        item->setData(Qt::UserRole,qs(row.title));
-        item->setToolTip(qs(row.title)+"\n"+qs(row.detail));
-        item->setSizeHint(QSize(0,row_height));item->setData(Qt::AccessibleTextRole,qs(row.title)+" "+qs(row.detail));
-        auto* content=new QWidget(list_);content->setObjectName("resultRow");content->setAttribute(Qt::WA_TransparentForMouseEvents);
-        auto* horizontal=new QHBoxLayout(content);horizontal->setContentsMargins(12,7,12,7);horizontal->setSpacing(13);
-        auto* icon=new QLabel(content);icon->setObjectName("resultIcon");icon->setFixedSize(32,32);icon->setAlignment(Qt::AlignCenter);horizontal->addWidget(icon);
-        auto* labels=new QVBoxLayout;labels->setContentsMargins(0,0,0,0);labels->setSpacing(2);
-        auto* title=new QLabel(content);title->setTextFormat(Qt::PlainText);QFont font=title->font();font.setPixelSize(row.copy?21:15);title->setFont(font);
-        title->setText(title->fontMetrics().elidedText(qs(row.title),Qt::ElideRight,width()-104));title->setMinimumWidth(0);labels->addWidget(title);
-        auto* detail=new QLabel(content);detail->setTextFormat(Qt::PlainText);detail->setProperty("muted",true);QFont small_font=detail->font();small_font.setPixelSize(12);detail->setFont(small_font);
+        const auto& row=rows_[i];auto* item=list_->item(static_cast<int>(i));
+        if(!item){
+            item=new QListWidgetItem(list_);item->setSizeHint(QSize(0,row_height));
+            auto* content=new QWidget(list_);content->setObjectName("resultRow");content->setAttribute(Qt::WA_TransparentForMouseEvents);
+            auto* horizontal=new QHBoxLayout(content);horizontal->setContentsMargins(12,7,12,7);horizontal->setSpacing(13);
+            auto* icon=new QLabel(content);icon->setObjectName("resultIcon");icon->setFixedSize(32,32);icon->setAlignment(Qt::AlignCenter);horizontal->addWidget(icon);
+            auto* labels=new QVBoxLayout;labels->setContentsMargins(0,0,0,0);labels->setSpacing(2);
+            auto* title=new QLabel(content);title->setObjectName("resultTitle");title->setTextFormat(Qt::PlainText);title->setMinimumWidth(0);labels->addWidget(title);
+            auto* detail=new QLabel(content);detail->setObjectName("resultDetail");detail->setTextFormat(Qt::PlainText);detail->setProperty("muted",true);
+            QFont small_font=detail->font();small_font.setPixelSize(12);detail->setFont(small_font);detail->setMinimumWidth(0);labels->addWidget(detail);
+            horizontal->addLayout(labels,1);list_->setItemWidget(item,content);
+        }
+        item->setData(Qt::UserRole,qs(row.title));item->setToolTip(qs(row.title)+"\n"+qs(row.detail));
+        item->setData(Qt::AccessibleTextRole,qs(row.title)+" "+qs(row.detail));
+        auto* content=list_->itemWidget(item);auto* title=content->findChild<QLabel*>("resultTitle");auto* detail=content->findChild<QLabel*>("resultDetail");
+        QFont font=title->font();font.setPixelSize(row.copy?21:15);title->setFont(font);
+        title->setText(title->fontMetrics().elidedText(qs(row.title),Qt::ElideRight,width()-104));
         detail->setVisible(!row.detail.empty() && row.detail!=L"Application" && row.detail!=L"Enter to copy");
-        detail->setText(detail->fontMetrics().elidedText(qs(row.detail),Qt::ElideMiddle,width()-104));detail->setMinimumWidth(0);labels->addWidget(detail);
-        horizontal->addLayout(labels,1);list_->setItemWidget(item,content);if(row.identity==old)selected=static_cast<int>(i);
+        detail->setText(detail->fontMetrics().elidedText(qs(row.detail),Qt::ElideMiddle,width()-104));
+        if(row.identity==old)selected=static_cast<int>(i);
     }
     list_->setFixedHeight(static_cast<int>(rows_.size())*row_height);list_->setCurrentRow(selected);list_->setUpdatesEnabled(true);
     update_icons();
@@ -294,17 +304,17 @@ void PaletteWindow::update_results(bool preserve) {
     list_->parentWidget()->layout()->invalidate();layout()->invalidate();
     list_->parentWidget()->updateGeometry();layout()->activate();adjustSize();request_icons();
 }
-void PaletteWindow::update_icons() {
-    search_icon_->setPixmap(ui_icon(UiIcon::search).pixmap(22,22));
-    settings_button_->setIcon(ui_icon(UiIcon::settings));
+void PaletteWindow::update_icons(const std::wstring* changed) {
+    if(!changed){search_icon_->setPixmap(ui_icon(UiIcon::search).pixmap(22,22));settings_button_->setIcon(ui_icon(UiIcon::settings));}
     for(int i=0;i<list_->count();++i) {
         auto* widget=list_->itemWidget(list_->item(i));auto* label=widget?widget->findChild<QLabel*>("resultIcon"):nullptr;if(!label)continue;
-        const auto& row=rows_[static_cast<size_t>(i)];QIcon icon;
+        const auto& row=rows_[static_cast<size_t>(i)];if(changed && (!row.app || row.app->id!=*changed))continue;QIcon icon;
         if(row.app)icon=icons_.value(qs(row.app->id));
         if(row.app && row.app->source==SearchSource::windows_settings)icon=ui_icon(UiIcon::settings);
         if(row.app && (row.app->source==SearchSource::path || row.app->source==SearchSource::file))icon=ui_icon(row.app->is_folder?UiIcon::folder:UiIcon::file);
         if(icon.isNull())icon=ui_icon(row.copy?UiIcon::calculator:UiIcon::application);
-        label->setPixmap(icon.pixmap(label->size()));
+        const auto pixmap=icon.pixmap(label->size(),devicePixelRatioF());
+        if(label->pixmap().cacheKey()!=pixmap.cacheKey())label->setPixmap(pixmap);
     }
 }
 bool PaletteWindow::clipboard(const std::wstring& value) {
@@ -345,15 +355,52 @@ void PaletteWindow::show_actions(const QPoint& point) {
     actions_open_=true;menu.exec(list_->viewport()->mapToGlobal(point));actions_open_=false;
 }
 void PaletteWindow::request_catalog() {
-    if(!settings_.search_apps){apps_.clear();update_results(true);return;}
+    if(!settings_.search_apps){apps_.clear();warm_apps_.clear();update_results(true);return;}
     if(loading_){refresh_again_=true;return;}loading_=true;
-    worker_.enqueue([this](std::stop_token stop){auto apps=discover_apps(stop);if(stop.stop_requested())return;
-        {std::lock_guard lock(inbox_mutex_);pending_apps_=std::move(apps);}PostMessageW(host_,msg_catalog,0,0);});
+    if(cache_directory_.isEmpty())cache_directory_=app_cache_directory();
+    const bool cached=!catalog_cache_loaded_;catalog_cache_loaded_=true;
+    const auto directory=cache_directory_;const auto portable=settings_.portable_apps;
+    catalog_worker_.enqueue([this,cached,directory,portable](std::stop_token stop){
+        if(cached){auto apps=read_app_cache(directory);
+            for(const auto& path:portable){AppEntry app;app.name=std::filesystem::path(path).stem().native();app.target=path;
+                app.id=L"portable:"+fold(path);app.folded=fold(app.name);app.kind=LaunchKind::executable;app.detail=L"Portable application";apps.push_back(std::move(app));}
+            load_usage(apps);
+            if(!apps.empty() && !stop.stop_requested()){
+                {std::lock_guard lock(inbox_mutex_);pending_cached_apps_=std::move(apps);}PostMessageW(host_,msg_cached_catalog,0,0);
+            }
+        }
+        auto apps=discover_apps(stop);if(stop.stop_requested())return;
+        {std::lock_guard lock(inbox_mutex_);pending_apps_=apps;}PostMessageW(host_,msg_catalog,0,0);
+        write_app_cache(directory,apps);
+    });
 }
 void PaletteWindow::request_icons() {
-    for(const auto& row:rows_)if(row.app){const auto app=*row.app;if((app.source!=SearchSource::application && app.source!=SearchSource::alias) || !requested_icons_.insert(app.id).second)continue;
-        worker_.enqueue([this,app](std::stop_token stop){if(stop.stop_requested())return;ComApartment apartment;const auto icon=load_app_icon(app);
-            {std::lock_guard lock(inbox_mutex_);pending_icons_.emplace_back(app.id,icon);}PostMessageW(host_,msg_icons,0,0);});}
+    std::vector<AppEntry> wanted;std::unordered_set<std::wstring> seen;
+    const auto now=QDateTime::currentMSecsSinceEpoch();
+    const auto add=[&](const AppEntry& app){
+        if((app.source!=SearchSource::application && app.source!=SearchSource::alias) || !seen.insert(app.id).second)return;
+        const auto id=qs(app.id);
+        if(icons_.contains(id) && !validate_icons_.contains(app.id))return;
+        if(icon_retry_after_.value(id)>now)return;
+        wanted.push_back(app);
+    };
+    for(const auto& row:rows_)if(row.app)add(*row.app);
+    if(settings_.search_apps)for(const auto& app:warm_apps_)add(app);
+    std::vector<std::wstring> plan;for(const auto& app:wanted)plan.push_back(app.id);
+    if(plan==icon_plan_)return;
+    icon_plan_=std::move(plan);const auto generation=++icon_generation_;const auto catalog=catalog_generation_;
+    if(cache_directory_.isEmpty())cache_directory_=app_cache_directory();
+    const auto directory=cache_directory_;
+    icon_worker_.replace_pending([this,wanted=std::move(wanted),directory,generation,catalog](std::stop_token stop){
+        ComApartment apartment;
+        for(const auto& app:wanted){
+            if(stop.stop_requested() || generation!=icon_generation_.load())return;
+            auto image=cached_app_icon(directory,app);
+            if(stop.stop_requested())return;
+            {std::lock_guard lock(inbox_mutex_);pending_icons_.push_back({app.id,std::move(image),catalog});}
+            PostMessageW(host_,msg_icons,0,0);
+        }
+    });
 }
 void PaletteWindow::schedule_sources() {
     currency_timer_->stop();
@@ -430,12 +477,32 @@ LRESULT PaletteWindow::message(UINT message,WPARAM w,LPARAM l) {
         if(keyboard_ && w==WTS_SESSION_LOCK){dismiss();keyboard_->stop();}
         else if(keyboard_ && !settings_open_ && (w==WTS_SESSION_UNLOCK || w==WTS_CONSOLE_CONNECT || w==WTS_REMOTE_CONNECT)){keyboard_->stop();keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));}return 0;
     case WM_POWERBROADCAST:if(keyboard_ && w==PBT_APMRESUMEAUTOMATIC && !settings_open_){keyboard_->stop();keyboard_->start(settings_.left_win,settings_.right_win,all_hotkeys(settings_));}return TRUE;
+    case msg_cached_catalog:{
+        std::optional<std::vector<AppEntry>> cached;{std::lock_guard lock(inbox_mutex_);cached=std::move(pending_cached_apps_);pending_cached_apps_.reset();}
+        if(cached && loading_ && apps_.empty() && settings_.search_apps){apps_=std::move(*cached);
+            warm_apps_.clear();for(const auto& hit:search(apps_,L"",24))warm_apps_.push_back(apps_[hit.index]);update_results(true);}
+        return 0;}
     case msg_catalog:{
-        {std::lock_guard lock(inbox_mutex_);if(pending_apps_){apps_=std::move(*pending_apps_);pending_apps_.reset();}}
+        {std::lock_guard lock(inbox_mutex_);if(pending_apps_){if(settings_.search_apps)apps_=std::move(*pending_apps_);pending_apps_.reset();}}
+        ++catalog_generation_;++icon_generation_;icon_plan_.clear();validate_icons_.clear();warm_apps_.clear();
+        std::unordered_set<std::wstring> present;for(const auto& app:apps_){present.insert(app.id);validate_icons_.insert(app.id);}
+        for(const auto& app:aliases_){present.insert(app.id);validate_icons_.insert(app.id);}
+        for(auto it=icons_.begin();it!=icons_.end();)if(!present.contains(it.key().toStdWString()))it=icons_.erase(it);else ++it;
+        for(const auto& hit:search(apps_,L"",24))warm_apps_.push_back(apps_[hit.index]);
         loading_=false;catalog_age_.start();update_results(true);if(refresh_again_){refresh_again_=false;request_catalog();}return 0;}
     case msg_icons:{
-        std::vector<std::pair<std::wstring,HICON>> incoming;{std::lock_guard lock(inbox_mutex_);incoming.swap(pending_icons_);}
-        for(auto& [id,icon]:incoming)if(icon){icons_.insert(qs(id),QIcon(QPixmap::fromImage(QImage::fromHICON(icon))));DestroyIcon(icon);}update_icons();return 0;}
+        std::vector<IconReply> incoming;{std::lock_guard lock(inbox_mutex_);incoming.swap(pending_icons_);}
+        for(auto& reply:incoming){if(reply.catalog!=catalog_generation_)continue;
+            const auto id=qs(reply.id);
+            if(!reply.image.isNull()){validate_icons_.erase(reply.id);icons_.insert(id,QIcon(QPixmap::fromImage(reply.image)));icon_retry_after_.remove(id);update_icons(&reply.id);}
+            else {icon_retry_after_.insert(id,QDateTime::currentMSecsSinceEpoch()+60000);
+                QTimer::singleShot(60100,this,[this]{icon_plan_.clear();request_icons();});}
+        }
+        if(icons_.size()>256){
+            std::unordered_set<std::wstring> keep;for(const auto& app:warm_apps_)keep.insert(app.id);for(const auto& row:rows_)if(row.app)keep.insert(row.app->id);
+            for(auto it=icons_.begin();it!=icons_.end() && icons_.size()>256;)if(!keep.contains(it.key().toStdWString()))it=icons_.erase(it);else ++it;
+        }
+        return 0;}
     case msg_launch:{
         std::optional<LaunchReply> reply;{std::lock_guard lock(inbox_mutex_);reply=std::move(pending_launch_);pending_launch_.reset();}launching_=false;
         if(reply && reply->ok){for(auto& app:apps_)if(app.id==reply->id){app.use_count=std::min(app.use_count+1,1000000u);app.last_used=static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());const auto updated=app;worker_.enqueue([updated](std::stop_token){save_usage(updated);});break;}set_notice({});dismiss();}
