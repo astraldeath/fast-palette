@@ -7,6 +7,7 @@
 #include "conversions.hpp"
 #include "number_format.hpp"
 #include "currency.hpp"
+#include "timestamps.hpp"
 #include "updater.hpp"
 #include "ui_theme.hpp"
 #include "win_util.hpp"
@@ -241,13 +242,14 @@ void PaletteWindow::update_results(bool preserve) {
     rows_.clear();
     const auto route=route_query(query_,settings_);
     const bool files_only=route.exclusive==Module::everything;
-    const auto conversion=route.allows(Module::conversions)?convert_units(normalize_number_input(qs(route.text)).toStdWString()):CalcResult{};
-    const auto money=route.allows(Module::currency) && conversion.status==CalcStatus::none?parse_currency_query(qs(route.text)):std::optional<CurrencyQuery>{};
+    const auto timestamp=route.allows(Module::timestamps)?convert_timestamp(qs(route.exclusive==Module::timestamps?L"unix "+route.text:route.text)):TimestampResult{};
+    const auto conversion=timestamp.status==CalcStatus::none && route.allows(Module::conversions)?convert_units(normalize_number_input(qs(route.text)).toStdWString()):CalcResult{};
+    const auto money=timestamp.status==CalcStatus::none && route.allows(Module::currency) && conversion.status==CalcStatus::none?parse_currency_query(qs(route.text)):std::optional<CurrencyQuery>{};
     const auto money_result=money?(currency_?currency_->convert(*money):CalcResult{CalcStatus::incomplete,0,L"Fetching currency rates..."}):CalcResult{};
-    const auto math=route.allows(Module::calculator) && conversion.status==CalcStatus::none && !money?
+    const auto math=timestamp.status==CalcStatus::none && route.allows(Module::calculator) && conversion.status==CalcStatus::none && !money?
         calculate(normalize_number_input(qs(route.exclusive==Module::calculator?L"="+route.text:route.text)).toStdWString(),settings_.calculator_degrees):CalcResult{};
     const auto calc=money?money_result:conversion.status!=CalcStatus::none?conversion:math;
-    const bool forced=route.exclusive==Module::calculator || route.exclusive==Module::conversions || route.exclusive==Module::currency;
+    const bool forced=route.exclusive==Module::calculator || route.exclusive==Module::conversions || route.exclusive==Module::currency || route.exclusive==Module::timestamps;
     const auto first=route.text.find_first_not_of(L" \t\r\n");
     std::vector<AppEntry> candidates;
     candidates.reserve(21);
@@ -256,14 +258,21 @@ void PaletteWindow::update_results(bool preserve) {
     if(route.allows(Module::settings) && first!=std::wstring::npos)collect(windows_settings());
     if(route.allows(Module::aliases))collect(aliases_);
     const auto hits=search(candidates,route.text,7);
-    if(calc.status==CalcStatus::value)rows_.push_back({localized_number_result(qs(calc.text)).toStdWString(),money && currency_?currency_->detail().toStdWString():L"Enter to copy",{},true,L"calculation",plain_number_result(qs(calc.text)).toStdWString()});
+    if(timestamp.status!=CalcStatus::none)rows_.push_back({timestamp.text.toStdWString(),timestamp.detail.toStdWString(),{},timestamp.status==CalcStatus::value,L"timestamp",timestamp.text.toStdWString()});
+    else if(calc.status==CalcStatus::value)rows_.push_back({localized_number_result(qs(calc.text)).toStdWString(),money && currency_?currency_->detail().toStdWString():L"Enter to copy",{},true,L"calculation",plain_number_result(qs(calc.text)).toStdWString()});
     else if(calc.status==CalcStatus::error && hits.empty())rows_.push_back({calc.text,money?L"":L"Check the expression",{},false,L"error"});
     else if(calc.status==CalcStatus::incomplete && hits.empty())rows_.push_back({money?calc.text:L"Keep typing",money?L"":L"Incomplete expression",{},false,L"incomplete"});
     if(!forced){
-        for(const auto& entry:source_results_)if(entry.source==SearchSource::path)rows_.push_back({entry.name,entry.detail,entry,false,entry.id});
+        const auto add_entry=[&](const AppEntry& entry){rows_.push_back({entry.name,entry.detail,entry,false,entry.id});};
+        auto hit=hits.begin();
+        // Keep exact names such as "Control Panel" ahead of an inferred command with arguments.
+        if(hit!=hits.end() && hit->score==0 && std::any_of(source_results_.begin(),source_results_.end(),[](const AppEntry& entry){
+            return entry.source==SearchSource::path && !entry.arguments.empty();
+        }))add_entry(candidates[(hit++)->index]);
+        for(const auto& entry:source_results_)if(entry.source==SearchSource::path)add_entry(entry);
         const auto file_count=std::count_if(source_results_.begin(),source_results_.end(),[](const auto& e){return e.source==SearchSource::file;});
         const size_t local_limit=file_count?5:7;
-        for(const auto& hit:hits){if(rows_.size()>=local_limit)break;const auto& app=candidates[hit.index];rows_.push_back({app.name,app.detail,app,false,app.id});}
+        for(;hit!=hits.end() && rows_.size()<local_limit;++hit)add_entry(candidates[hit->index]);
         for(const auto& entry:source_results_){if(rows_.size()>=7)break;if(entry.source!=SearchSource::file)continue;
             if(std::none_of(rows_.begin(),rows_.end(),[&](const auto& row){return row.identity==entry.id;}))rows_.push_back({entry.name,entry.detail,entry,false,entry.id});}
     }
@@ -409,7 +418,7 @@ void PaletteWindow::schedule_sources() {
     if(route.allows(Module::currency) && (!route.allows(Module::conversions) || convert_units(normalize_number_input(qs(route.text)).toStdWString()).status==CalcStatus::none) && parse_currency_query(qs(route.text)))currency_timer_->start();
     const auto trimmed=QString::fromStdWString(route.text).trimmed();
     sources_pending_=!trimmed.isEmpty() &&
-        ((route.allows(Module::paths) && !expand_path_query(route.text).empty()) || route.allows(Module::everything));
+        (route.allows(Module::paths) || route.allows(Module::everything));
     if(sources_pending_)source_timer_->start();
 }
 void PaletteWindow::request_currency() {
@@ -420,18 +429,22 @@ void PaletteWindow::request_currency() {
 }
 void PaletteWindow::request_sources() {
     const auto generation=source_generation_.load();const auto query=query_;const auto settings=settings_;
-    source_worker_.enqueue([this,generation,query,settings](std::stop_token stop){
+    source_worker_.replace_pending([this,generation,query,settings](std::stop_token stop){
         const auto cancelled=[&]{return stop.stop_requested() || generation!=source_generation_.load();};
         if(cancelled())return;SourceReply reply{generation,{}};
         const auto route=route_query(query,settings);
         const auto everything=route_everything(query,settings);
         if(route.allows(Module::paths))reply.entries=path_results(route.text);
         if(cancelled())return;
+        const auto publish=[this](SourceReply ready){
+            {std::lock_guard lock(inbox_mutex_);pending_sources_=std::move(ready);}PostMessageW(host_,msg_sources,0,0);
+        };
         if(everything.enabled){
+            if(!reply.entries.empty()){reply.pending=true;publish(reply);reply.pending=false;}
             auto files=query_everything(everything_window(),everything.text,cancelled);reply.everything_available=files.available;
             for(auto& entry:files.entries)reply.entries.push_back(std::move(entry));}
         if(cancelled())return;
-        {std::lock_guard lock(inbox_mutex_);pending_sources_=std::move(reply);}PostMessageW(host_,msg_sources,0,0);
+        publish(std::move(reply));
     });
 }
 void PaletteWindow::edit_settings() {
@@ -466,7 +479,11 @@ LRESULT PaletteWindow::message(UINT message,WPARAM w,LPARAM l) {
     switch(message){
     case msg_sources:{
         std::optional<SourceReply> reply;{std::lock_guard lock(inbox_mutex_);reply=std::move(pending_sources_);pending_sources_.reset();}
-        if(reply && reply->generation==source_generation_.load()){source_results_=std::move(reply->entries);everything_available_=reply->everything_available;sources_pending_=false;update_results(true);}return 0;}
+        if(reply && reply->generation==source_generation_.load()){
+            const bool select_direct=list_->currentRow()==0 && !reply->entries.empty() && reply->entries.front().source==SearchSource::path;
+            source_results_=std::move(reply->entries);everything_available_=reply->everything_available;sources_pending_=reply->pending;
+            update_results(!select_direct);
+        }return 0;}
     case msg_invoke:case WM_HOTKEY:
         if(isVisible()&&!settings_open_)dismiss(true);
         else {show();if(message==msg_invoke && (w==VK_LWIN || w==VK_RWIN) && isVisible())reveal_taskbar();}

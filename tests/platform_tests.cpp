@@ -1,5 +1,6 @@
 #include "settings.hpp"
 #include "catalog.hpp"
+#include "providers.hpp"
 #include "core.hpp"
 #include <iostream>
 #include <filesystem>
@@ -58,7 +59,7 @@ int main(int argc, char** argv) {
     desired.search_apps=false;desired.search_calculator=false;desired.search_settings=false;desired.search_paths=false;desired.search_everything=true;
     desired.everything_prefix_only=true;desired.everything_prefix=L"ef";
     desired.automatic_updates=false;
-    desired.search_conversions=false;desired.search_aliases=false;desired.search_currency=false;desired.calculator_degrees=true;
+    desired.search_conversions=false;desired.search_aliases=false;desired.search_currency=false;desired.search_timestamps=false;desired.calculator_degrees=true;
     desired.aliases={{L"work",L"C:\\Projects",L""},{L"edit",L"notepad.exe",L"\"my notes.txt\""}};
     set_module_rule(desired,Module::apps,{L"launch",true});
     desired.portable_apps={L"C:\\Program Files\\Example\\example.exe", L"C:\\Portable\\éditeur.exe"};
@@ -87,7 +88,7 @@ int main(int argc, char** argv) {
     check(actual.extra_bindings==desired.extra_bindings, "multiple keybindings roundtrip");
     check(actual.aliases==desired.aliases,"aliases including empty arguments roundtrip");
     check(actual.prefixes==desired.prefixes,"module prefixes roundtrip");
-    check(!actual.search_conversions && !actual.search_aliases && !actual.search_currency && actual.calculator_degrees,"new module and angle preferences roundtrip");
+    check(!actual.search_conversions && !actual.search_aliases && !actual.search_currency && !actual.search_timestamps && actual.calculator_degrees,"new module and angle preferences roundtrip");
     check(!actual.search_apps && !actual.search_calculator && !actual.search_settings && !actual.search_paths && actual.search_everything,"independent source toggles roundtrip");
     check(actual.everything_prefix_only && actual.everything_prefix==L"ef","Everything prefix options roundtrip");
     check(defaults.automatic_updates && !actual.automatic_updates,"automatic update preference persists");
@@ -158,17 +159,23 @@ int main(int argc, char** argv) {
         Microsoft::WRL::ComPtr<IPersistFile> file;link.As(&file);file->Save(shortcut.c_str(),TRUE);
         AppEntry app;app.target=shortcut.native();app.kind=LaunchKind::shortcut;
         check(launch_app(app,error),"shell launches shortcut fixture");
-        for(int attempt=0;attempt<100 && !std::filesystem::exists(output);++attempt)Sleep(20);
-        std::wstring actual_output;
-        for(int attempt=0;attempt<50;++attempt) {
-            HANDLE result=CreateFileW(output.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-            if(result!=INVALID_HANDLE_VALUE) {
-                const DWORD bytes=GetFileSize(result,nullptr);actual_output.resize(bytes/sizeof(wchar_t));DWORD read=0;
-                if(bytes)ReadFile(result,actual_output.data(),bytes,&read,nullptr);CloseHandle(result);break;
+        const auto read_probe=[&]{
+            for(int attempt=0;attempt<150;++attempt){
+                HANDLE result=CreateFileW(output.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+                if(result!=INVALID_HANDLE_VALUE){
+                    std::wstring content(GetFileSize(result,nullptr)/sizeof(wchar_t),L'\0');DWORD read=0;
+                    const bool ok=ReadFile(result,content.data(),static_cast<DWORD>(content.size()*sizeof(wchar_t)),&read,nullptr)!=FALSE;
+                    CloseHandle(result);if(ok)return content;
+                }
+                Sleep(20);
             }
-            Sleep(20);
-        }
-        check(actual_output==L"alpha beta\n"+temp.native(),"shortcut launch preserves arguments and working directory");
+            return std::wstring{};
+        };
+        check(read_probe()==L"alpha beta\n"+temp.native(),"shortcut launch preserves arguments and working directory");
+        std::filesystem::remove(output);
+        const auto commands=path_results(L"\""+probe.native()+L"\" "+arguments);
+        check(commands.size()==1 && launch_app(commands[0],error),"Run result launches a quoted executable with arguments");
+        check(read_probe().starts_with(L"alpha beta\n"),"Run result passes quoted argument as one value");
         std::filesystem::remove(output);std::filesystem::remove(shortcut);
     }
     std::filesystem::remove(normal);std::filesystem::remove(special);std::filesystem::remove(temp);

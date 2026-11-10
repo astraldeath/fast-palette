@@ -19,6 +19,8 @@ int main(){int failed=0;const auto check=[&](bool value,const char* name){if(!va
     check(!route_query(L"usd to won",s).allows(Module::currency),"currency prefix-only excludes unprefixed queries");
     s.search_currency=false;
     check(!route_query(L"fx usd to yen",s).allows(Module::currency),"disabled currency prefix stays disabled");
+    route=route_query(L"unix 0",s);check(route.exclusive==Module::timestamps && !route.allows(Module::calculator),"timestamp prefix isolates module");
+    s.search_timestamps=false;check(!route_query(L"unix 0",s).allows(Module::timestamps),"timestamps toggle disables prefix");
     std::wstring error;set_module_rule(s,Module::paths,{L"win",false});check(!valid_module_settings(s,error),"duplicate prefixes rejected");
     set_module_rule(s,Module::paths,{L"",false});check(valid_module_settings(s,error),"optional prefix can be cleared");
     set_module_rule(s,Module::paths,{L"",true});check(!valid_module_settings(s,error),"prefix-only needs prefix");

@@ -1,6 +1,8 @@
 #include "providers.hpp"
 #include "core.hpp"
 #include "modules.hpp"
+#include "win_util.hpp"
+#include <shlobj.h>
 #include <algorithm>
 #include <cstring>
 #include <cwctype>
@@ -84,13 +86,111 @@ std::wstring expand_path_query(std::wstring_view query) {
     return expanded;
 }
 
-std::vector<AppEntry> path_results(std::wstring_view query) {
-    const auto path=expand_path_query(query);if(path.empty())return {};
-    const auto attributes=GetFileAttributesW(path.c_str());if(attributes==INVALID_FILE_ATTRIBUTES)return {};
-    AppEntry entry;entry.id=L"path:"+fold(path);entry.target=path;entry.name=std::filesystem::path(path).filename().native();
-    if(entry.name.empty())entry.name=path;entry.detail=path;entry.kind=LaunchKind::executable;entry.source=SearchSource::path;
-    entry.is_folder=(attributes&FILE_ATTRIBUTE_DIRECTORY)!=0;
+namespace {
+std::wstring_view trim_query(std::wstring_view text) {
+    while(!text.empty() && iswspace(text.front()))text.remove_prefix(1);
+    while(!text.empty() && iswspace(text.back()))text.remove_suffix(1);
+    return text;
+}
+bool command_extension(std::wstring_view extension) {
+    return extension==L".exe" || extension==L".com" || extension==L".msc" || extension==L".cpl" ||
+           extension==L".cmd" || extension==L".bat";
+}
+std::wstring search_command(const std::wstring& directories,const std::wstring& name,const std::wstring& extension) {
+    if(directories.empty())return {};
+    // Try console and Control Panel tools first: services.exe is the service manager process, not its UI.
+    constexpr const wchar_t* suffixes[]={L".msc",L".cpl",L".exe",L".com",L".cmd",L".bat"};
+    wchar_t found[32768]{};
+    for(const auto* suffix:suffixes){
+        if(!extension.empty() && extension!=suffix)continue;
+        const auto file=extension.empty()?name+suffix:name;
+        const auto length=SearchPathW(directories.c_str(),file.c_str(),nullptr,static_cast<DWORD>(std::size(found)),found,nullptr);
+        if(length && length<std::size(found)){
+            const auto attributes=GetFileAttributesW(found);
+            if(attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY))return found;
+        }
+    }
+    return {};
+}
+std::wstring registered_command(const std::wstring& name,const std::wstring& extension) {
+    if(!extension.empty() && extension!=L".exe")return {};
+    const auto key=L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\"+name+(extension.empty()?L".exe":L"");
+    for(auto hive:{HKEY_CURRENT_USER,HKEY_LOCAL_MACHINE})for(auto view:{RRF_SUBKEY_WOW6464KEY,RRF_SUBKEY_WOW6432KEY}){
+        wchar_t value[32768]{};DWORD bytes=sizeof(value);
+        if(RegGetValueW(hive,key.c_str(),nullptr,RRF_RT_REG_SZ|RRF_RT_REG_EXPAND_SZ|view,nullptr,value,&bytes)!=ERROR_SUCCESS)continue;
+        auto target=expand_path_query(value);
+        if(target.empty() || fold(std::filesystem::path(target).extension().native())!=L".exe")continue;
+        const auto attributes=GetFileAttributesW(target.c_str());
+        if(attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY))return target;
+    }
+    return {};
+}
+std::wstring resolve_run_name(const std::wstring& name) {
+    if(name.empty() || name.size()>255 || name.back()==L'.' || name.back()==L' ' ||
+       name.find_first_of(L"<>:\"/\\|?*%")!=name.npos)return {};
+    const auto extension=fold(std::filesystem::path(name).extension().native());
+    if(!extension.empty() && !command_extension(extension))return {};
+    wchar_t directory[MAX_PATH]{};std::wstring system;
+    auto length=GetSystemDirectoryW(directory,MAX_PATH);if(length && length<MAX_PATH)system=directory;
+    length=GetWindowsDirectoryW(directory,MAX_PATH);if(length && length<MAX_PATH){if(!system.empty())system+=L';';system+=directory;}
+    if(auto found=search_command(system,name,extension);!found.empty())return found;
+    if(auto found=registered_command(name,extension);!found.empty())return found;
+    wchar_t environment[32768]{};
+    length=GetEnvironmentVariableW(L"PATH",environment,static_cast<DWORD>(std::size(environment)));
+    if(!length || length>=std::size(environment))return {};
+    std::wstring paths;std::wstring_view remaining(environment,length);
+    while(!remaining.empty()){
+        const auto separator=remaining.find(L';');const auto path=expand_path_query(remaining.substr(0,separator));
+        if(!path.empty() && !path.starts_with(L"\\\\") && path.find(L';')==path.npos){if(!paths.empty())paths+=L';';paths+=path;}
+        if(separator==remaining.npos)break;
+        remaining.remove_prefix(separator+1);
+    }
+    return search_command(paths,name,extension);
+}
+std::vector<AppEntry> path_entry(std::wstring target,std::wstring arguments={}) {
+    if(target.empty())return {};
+    const auto attributes=GetFileAttributesW(target.c_str());if(attributes==INVALID_FILE_ATTRIBUTES)return {};
+    const bool folder=(attributes&FILE_ATTRIBUTE_DIRECTORY)!=0;
+    if(!arguments.empty() && (folder || !command_extension(fold(std::filesystem::path(target).extension().native()))))return {};
+    AppEntry entry;entry.id=L"path:"+fold(target);entry.name=std::filesystem::path(target).filename().native();
+    if(entry.name.empty())entry.name=target;
+    if(!arguments.empty()){entry.name+=L" "+arguments;entry.id+=L"|"+arguments;}
+    entry.detail=target;entry.target=std::move(target);entry.arguments=std::move(arguments);
+    entry.kind=LaunchKind::executable;entry.source=SearchSource::path;entry.is_folder=folder;
     return {std::move(entry)};
+}
+}
+
+std::vector<AppEntry> path_results(std::wstring_view query) {
+    query=trim_query(query);
+    if(query.empty() || query.size()>32760 || std::any_of(query.begin(),query.end(),[](wchar_t c){return iswcntrl(c) && c!=L'\t';}))return {};
+    const auto folded=fold(query);
+    if(folded.starts_with(L"ms-settings:") || folded.starts_with(L"shell:")){
+        AppEntry entry;entry.target=query;entry.id=L"path:"+folded;entry.name=query;
+        if(folded.starts_with(L"shell:")){
+            if(query.size()==6)return {};
+            ComApartment apartment;PIDLIST_ABSOLUTE item=nullptr;SFGAOF attributes=0;
+            const auto result=SHParseDisplayName(entry.target.c_str(),nullptr,&item,SFGAO_FOLDER,&attributes);
+            CoTaskMemFree(item);if(FAILED(result))return {};
+            entry.kind=LaunchKind::shell;entry.is_folder=(attributes&SFGAO_FOLDER)!=0;
+        } else {
+            const auto slug=std::wstring_view(folded).substr(12);
+            if(slug.find_first_not_of(L"abcdefghijklmnopqrstuvwxyz0123456789-")!=slug.npos)return {};
+            entry.kind=LaunchKind::executable;entry.detail=L"Windows Settings";
+        }
+        entry.source=SearchSource::path;return {std::move(entry)};
+    }
+    // An existing full path wins over interpreting spaces as argument separators.
+    if(auto direct=path_entry(expand_path_query(query));!direct.empty())return direct;
+    const bool quoted=query.front()==L'"';
+    const auto end=quoted?query.find(L'"',1):query.find_first_of(L" \t");
+    if(quoted && (end==query.npos || (end+1<query.size() && !iswspace(query[end+1]))))return {};
+    const auto name=quoted?query.substr(1,end-1):query.substr(0,end);
+    const auto args=end==query.npos?std::wstring_view{}:trim_query(query.substr(end+(quoted?1:0)));
+    auto target=expand_path_query(name);
+    if(target.empty())target=resolve_run_name(std::wstring(name));
+    else if(!args.empty() && !command_extension(fold(std::filesystem::path(target).extension().native())))return {};
+    return path_entry(std::move(target),std::wstring(args));
 }
 
 // Everything's documented Unicode IPC v1 format uses DWORD offsets, including on x64.

@@ -43,6 +43,7 @@ Settings load_settings(const wchar_t* path) {
     s.search_everything=read_dword(key.value,L"SearchEverything",0)!=0;
     s.search_conversions=read_dword(key.value,L"SearchConversions",1)!=0;
     s.search_aliases=read_dword(key.value,L"SearchAliases",1)!=0;
+    s.search_timestamps=read_dword(key.value,L"SearchTimestamps",1)!=0;
     s.search_currency=read_dword(key.value,L"SearchCurrency",1)!=0;
     s.calculator_degrees=read_dword(key.value,L"CalculatorDegrees",0)!=0;
     s.everything_prefix_only=read_dword(key.value,L"EverythingPrefixOnly",0)!=0;
@@ -121,7 +122,7 @@ bool save_settings(const Settings& s, std::wstring& error, const wchar_t* path) 
     const std::pair<const wchar_t*,DWORD> values[]={ {L"LeftWin",s.left_win},{L"RightWin",s.right_win},{L"StartAtLogin",s.start_at_login},{L"Modifiers",s.modifiers},{L"Key",s.key},
         {L"SearchApps",s.search_apps},{L"SearchCalculator",s.search_calculator},{L"SearchSettings",s.search_settings},
         {L"SearchPaths",s.search_paths},{L"SearchEverything",s.search_everything},{L"EverythingPrefixOnly",s.everything_prefix_only},{L"AutomaticUpdates",s.automatic_updates},
-        {L"SearchConversions",s.search_conversions},{L"SearchAliases",s.search_aliases},{L"SearchCurrency",s.search_currency},{L"CalculatorDegrees",s.calculator_degrees} };
+        {L"SearchConversions",s.search_conversions},{L"SearchAliases",s.search_aliases},{L"SearchCurrency",s.search_currency},{L"SearchTimestamps",s.search_timestamps},{L"CalculatorDegrees",s.calculator_degrees} };
     for (const auto& [name,value]:values) if (status==ERROR_SUCCESS) status=RegSetValueExW(key.value,name,0,REG_DWORD,reinterpret_cast<const BYTE*>(&value),sizeof(value));
     if (status!=ERROR_SUCCESS) { error=system_error(status); return false; }
     return true;

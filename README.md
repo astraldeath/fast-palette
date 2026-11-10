@@ -12,7 +12,7 @@ Download `FastPalette.exe` from [Releases](https://github.com/astraldeath/fast-p
 - Under **Settings → Search**, toggle each module, choose its prefix, or restrict it to prefixed searches.
 - Right-click a result for actions. **Ctrl+Shift+Enter** runs as administrator, **Ctrl+Enter** opens its containing folder, and **Ctrl+Shift+C** copies its path.
 - Create named app, folder, or command shortcuts under **Settings → Aliases**. Enter arguments separately from the target.
-- Search settings by name (`Bluetooth`, `Windows Update`), or open a path such as `%appdata%`, `%temp%`, or `C:\Users`.
+- Search settings by name (`Bluetooth`, `Windows Update`), or open paths like `%appdata%` and `C:\Users`. **Paths and commands** also resolves Run commands such as `winver.exe`, `services.msc`, `appwiz.cpl`, `cmd /k ver`, and `shell:Startup`. Use `path` to search only this module.
 - Enable **Everything** to search its index while Everything is running. Its prefix (default `? `) shows only Everything results. Enable **Only with prefix** to exclude it from ordinary searches. Everything syntax passes through unchanged, including `ext:pdf`, `size:>1mb`, wildcards, Boolean operators, and `regex:`.
 - Configured Windows shortcuts replace their normal action while the app runs. Other shortcuts pass through. Windows security shortcuts remain reserved.
 
@@ -21,6 +21,8 @@ Calculator examples: `2pi`, `2(3+4)`, `sqrt(81)`, `2^10`, `100!`, `sin(pi/2)`. S
 Convert length, weight, temperature, time, storage, or transfer rates: `180cm to ftin`, `5'11" to cm`, `74in to ftin`, `2gb to mb`, `2 GiB to MiB`, `72f to c`. `ftin` means feet and inches. Storage shorthand `gb`/`mb` means decimal bytes; `GiB`/`MiB` uses 1024. Speeds respect case: `2 MB/s` or `2 MBps` gives `16 Mbps`; `2 mbps` or `2 mb/s` gives `0.25 MB/s`.
 
 Convert fiat or crypto: `usd to yen`, `100 usd to won`, `5 btc to usd`, or `5 btc to xmr`. Omit the amount for 1. The Currency module uses keyless [daily exchange rates](https://github.com/fawazahmed0/exchange-api), shows their date, and caches them for up to seven days offline. Its default prefix is `fx`.
+
+Convert Unix timestamps: `unix 1700000000`, `unix 1700000000123ms`, `2026-10-06 to unix`, or `now to unix ms`. Dates default to UTC; append `to local` for local time. ISO dates accept explicit timezone offsets. Toggle **Timestamps** or change its `unix` prefix under Search settings.
 
 Settings are stored in `HKCU\Software\FastPalette`. After moving the executable, run it once to update launch at sign-in. Use the tray menu to exit.
 

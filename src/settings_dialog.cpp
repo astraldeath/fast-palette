@@ -265,8 +265,8 @@ public:
         auto* search_page = new QWidget(tabs);
         auto* search_layout = new QVBoxLayout(search_page);
         search_layout->setContentsMargins(24,16,24,16);search_layout->setSpacing(10);
-        const char* names[]={"searchApps","searchCalculator","searchSettings","searchPaths","searchEverything","searchConversions","searchAliases","searchCurrency"};
-        const char* labels[]={"Applications","Calculator","Windows Settings","Paths","Everything","Unit conversions","Aliases","Currency"};
+        const char* names[]={"searchApps","searchCalculator","searchSettings","searchPaths","searchEverything","searchConversions","searchAliases","searchCurrency","searchTimestamps"};
+        const char* labels[]={"Applications","Calculator","Windows Settings","Paths and commands","Everything","Unit conversions","Aliases","Currency","Timestamps"};
         for(size_t i=0;i<module_count;++i){
             const auto module=static_cast<Module>(i);const auto rule=module_rule(draft_,module);
             auto* row=new QHBoxLayout;
@@ -558,7 +558,7 @@ private:
             draft_.right_win = right_win_->isChecked();
             draft_.start_at_login = start_at_login_->isChecked();
             draft_.automatic_updates=automatic_updates_->isChecked();
-            bool* enabled[]={&draft_.search_apps,&draft_.search_calculator,&draft_.search_settings,&draft_.search_paths,&draft_.search_everything,&draft_.search_conversions,&draft_.search_aliases,&draft_.search_currency};
+            bool* enabled[]={&draft_.search_apps,&draft_.search_calculator,&draft_.search_settings,&draft_.search_paths,&draft_.search_everything,&draft_.search_conversions,&draft_.search_aliases,&draft_.search_currency,&draft_.search_timestamps};
             for(size_t i=0;i<module_count;++i){*enabled[i]=module_enabled_[i]->isChecked();set_module_rule(draft_,static_cast<Module>(i),{module_prefix_[i]->text().toStdWString(),module_only_[i]->isChecked()});}
             draft_.calculator_degrees=degrees_->isChecked();
         }

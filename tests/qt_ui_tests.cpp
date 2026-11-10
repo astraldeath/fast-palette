@@ -27,7 +27,7 @@ int main(int argc,char** argv) {
     int failed=0;
     const auto check=[&](bool value,const char* name){if(!value){++failed;std::cerr<<"FAIL: "<<name<<'\n';}};
     palette::Settings test_settings;test_settings.search_everything=true;test_settings.automatic_updates=false;
-    test_settings.aliases={{L"worktest",L"%appdata%",L""}};
+    test_settings.aliases={{L"worktest",L"%appdata%",L""},{L"cmd Prompt",L"%appdata%",L""}};
     palette::PaletteWindow window(test_settings);
     check(window.create(GetModuleHandleW(nullptr),true),"framework window created");
     auto* input=window.findChild<QLineEdit*>("queryInput");
@@ -56,6 +56,10 @@ int main(int argc,char** argv) {
     check(results->item(0)->data(Qt::UserRole).toString()==palette::localized_number_result("100002"),"calculator accepts grouped input");
     input->setText("conv 100,000cm to m");
     check(results->item(0)->data(Qt::UserRole).toString()==palette::localized_number_result("1000 m"),"unit conversion accepts grouped input");
+    input->setText("unix 0");
+    check(results->count()==1 && results->item(0)->data(Qt::UserRole).toString()=="1970-01-01T00:00:00Z","timestamp result avoids locale number formatting");
+    input->setText("1970-01-01 to unix");
+    check(results->item(0)->data(Qt::UserRole).toString()=="0","date converts to epoch in palette");
     input->setText("1e6");
     check(results->item(0)->data(Qt::UserRole).toString()==QLocale::system().toString(1000000),"scientific input displays expanded localized integer");
     input->setText("1e-6");
@@ -138,6 +142,17 @@ int main(int argc,char** argv) {
     const auto appdata=QString::fromStdWString(palette::expand_path_query(L"%appdata%"));
     while(path_wait.elapsed()<2000 && !results->item(0)->toolTip().contains(appdata))QTest::qWait(20);
     check(results->item(0)->toolTip().contains(appdata),"current environment path wins over superseded query");
+    for(const auto& [query,title]:{std::pair{"winver.exe","winver.exe"},{"services.msc","services.msc"},{"path cmd /k ver","cmd.exe /k ver"}}){
+        input->setText(query);QElapsedTimer wait;wait.start();
+        while(wait.elapsed()<2500 && results->item(0)->data(Qt::UserRole).toString().compare(title,Qt::CaseInsensitive)!=0)QTest::qWait(20);
+        check(results->item(0)->data(Qt::UserRole).toString().compare(title,Qt::CaseInsensitive)==0 && results->currentRow()==0,"direct Run result is selected");
+    }
+    input->setText("cmd Prompt");QElapsedTimer command_wait;command_wait.start();
+    while(command_wait.elapsed()<2500 && (results->count()<2 ||
+        results->item(1)->data(Qt::UserRole).toString().compare("cmd.exe Prompt",Qt::CaseInsensitive)!=0))QTest::qWait(20);
+    check(results->count()>=2 && results->item(0)->data(Qt::UserRole).toString()=="cmd Prompt" &&
+        results->item(1)->data(Qt::UserRole).toString().compare("cmd.exe Prompt",Qt::CaseInsensitive)==0,
+        "exact alias remains above an inferred command with arguments");
     if(argc>1 && !application.arguments().contains("--currency-live") && !application.arguments().contains("--catalog-live") && !application.arguments().contains("--taskbar-live")){input->setText("? Everything.exe");QElapsedTimer files_wait;files_wait.start();
         while(files_wait.elapsed()<2000 && !results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive))QTest::qWait(20);
         check(results->item(0)->toolTip().contains("Everything.exe",Qt::CaseInsensitive),"Everything results reach the palette");
@@ -171,11 +186,11 @@ int main(int argc,char** argv) {
         fullscreen.close();
     }
     palette::Settings disabled;disabled.search_apps=false;disabled.search_calculator=false;
-    disabled.search_settings=false;disabled.search_paths=false;disabled.search_everything=false;disabled.search_conversions=false;disabled.search_aliases=false;disabled.search_currency=false;disabled.automatic_updates=false;
+    disabled.search_settings=false;disabled.search_paths=false;disabled.search_everything=false;disabled.search_conversions=false;disabled.search_aliases=false;disabled.search_currency=false;disabled.search_timestamps=false;disabled.automatic_updates=false;
     palette::PaletteWindow disabled_window(disabled);
     auto* disabled_input=disabled_window.findChild<QLineEdit*>("queryInput");
     auto* disabled_results=disabled_window.findChild<QListWidget*>("results");
-    for(const auto* query:{"2+2","bluetooth","%appdata%","? Everything.exe","conv 180cm to ftin","@ worktest","fx usd to yen"}){
+    for(const auto* query:{"2+2","bluetooth","%appdata%","? Everything.exe","conv 180cm to ftin","@ worktest","fx usd to yen","unix 0","winver.exe"}){
         disabled_input->setText(query);QTest::qWait(90);
         check(disabled_results->count()==1 && disabled_results->item(0)->data(Qt::UserRole).toString()=="No results","disabled sources produce no results");}
     std::cout<<"Qt palette checks: "<<(failed?"FAILED":"passed")<<'\n';

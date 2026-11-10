@@ -58,7 +58,7 @@ private:
     void set_notice(const QString& text);
     bool clipboard(const std::wstring& text);
     struct Row { std::wstring title,detail; std::optional<AppEntry> app; bool copy=false; std::wstring identity,copy_text; };
-    struct SourceReply { std::uint64_t generation; std::vector<AppEntry> entries; bool everything_available=true; };
+    struct SourceReply { std::uint64_t generation; std::vector<AppEntry> entries; bool everything_available=true,pending=false; };
     struct LaunchReply { bool ok; std::wstring id,error; };
     HWND host_=nullptr,previous_=nullptr;
     struct RaisedTaskbar { HWND window; DWORD process; bool topmost; };
